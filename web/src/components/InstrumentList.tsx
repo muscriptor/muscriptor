@@ -1,6 +1,7 @@
 import { useEffect, useState, type RefObject } from "react";
 import clsx from "clsx";
 import type { AudioEngine } from "../audio";
+import { Button } from "./Button";
 import { instrumentColor, type PianoRoll } from "../pianoroll";
 import { label } from "../instruments";
 import { IconSound, IconSoundOff } from "./icons";
@@ -11,14 +12,14 @@ function HelpHint(props: { children: string }) {
     <span className="group/help relative ml-1.5 inline-flex align-middle">
       <span
         tabIndex={0}
-        className="flex size-4 cursor-help items-center justify-center rounded-full border border-line-strong text-[10px] font-semibold text-muted outline-none transition-colors duration-150 hover:border-accent hover:text-content focus-visible:border-accent focus-visible:text-content"
+        className="flex size-4 cursor-help items-center justify-center border border-line-strong text-[10px] font-semibold text-muted outline-none transition-colors duration-150 hover:border-accent hover:text-content focus-visible:border-accent focus-visible:text-content"
         aria-label="What does this mean?"
       >
         ?
       </span>
       <span
         role="tooltip"
-        className="pointer-events-none absolute right-0 top-[calc(100%+8px)] z-30 w-60 rounded-lg border border-line-strong bg-surface-2 px-3 py-2.5 text-sm font-normal leading-snug text-muted opacity-0 shadow-[0_18px_40px_-20px_rgba(0,0,0,0.9)] transition-opacity duration-150 group-hover/help:opacity-100 group-focus-within/help:opacity-100"
+        className="pointer-events-none absolute right-0 top-[calc(100%+8px)] z-30 w-60 border border-line bg-bg px-3 py-2.5 text-sm font-normal leading-snug text-muted opacity-0 shadow-md transition-opacity duration-150 group-hover/help:opacity-100 group-focus-within/help:opacity-100"
       >
         {props.children}
       </span>
@@ -29,8 +30,8 @@ function HelpHint(props: { children: string }) {
 /** A given instrument that wasn't detected: gray, struck-through, no controls. */
 function UndetectedRow(props: { name: string }) {
   return (
-    <li className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-muted opacity-40 [animation:rise_0.4s_var(--ease-fluid)_both]">
-      <span className="size-3 shrink-0 rounded-sm bg-faint" />
+    <li className="flex items-center gap-2.5 px-2.5 py-2 text-muted opacity-40 [animation:rise_0.4s_var(--ease-fluid)_both]">
+      <span className="size-3 shrink-0 bg-faint" />
       <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap line-through">
         {label(props.name)}
       </span>
@@ -52,7 +53,7 @@ function InstrumentRow(props: {
   const { name, muted, soloed, onToggleMute, onToggleSolo, onHover } = props;
   return (
     <li
-      className="group flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-muted transition-colors duration-150 ease-fluid hover:bg-white/[0.04] hover:text-content [animation:rise_0.4s_var(--ease-fluid)_both]"
+      className="group flex items-center gap-2.5 px-2.5 py-2 text-muted transition-colors duration-150 ease-fluid hover:bg-white/[0.04] hover:text-content [animation:rise_0.4s_var(--ease-fluid)_both]"
       onMouseEnter={() => onHover(name)}
       onMouseLeave={() => onHover(null)}
     >
@@ -63,7 +64,7 @@ function InstrumentRow(props: {
         )}
       >
         <span
-          className="size-3 shrink-0 rounded-sm shadow-[0_0_10px_-1px_currentColor]"
+          className="size-3 shrink-0"
           style={{ background: instrumentColor(name) }}
         />
         <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
@@ -71,12 +72,13 @@ function InstrumentRow(props: {
         </span>
       </div>
       <div className="flex items-center gap-0.5">
-        <button
+        <Button
           type="button"
+          kind="ghost"
           className={clsx(
-            "-my-1 flex size-6 shrink-0 items-center justify-center rounded-md border-none bg-transparent p-0 text-xs font-semibold transition-[opacity,background,color] duration-150 ease-fluid hover:border-none hover:bg-white/[0.08]",
+            "-my-1 flex size-6 shrink-0 items-center justify-center text-xs font-semibold transition-[opacity,background,color] hover:bg-white/[0.08]",
             soloed
-              ? "text-[#ffcc44] opacity-100"
+              ? "text-accent-2 opacity-100"
               : "text-muted opacity-70 group-hover:opacity-100 hover:text-content",
           )}
           title={soloed ? "Unsolo" : "Solo (mute everything else)"}
@@ -84,13 +86,14 @@ function InstrumentRow(props: {
           onClick={onToggleSolo}
         >
           S
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
+          kind="ghost"
           className={clsx(
-            "-my-1 flex size-6 shrink-0 items-center justify-center rounded-md border-none bg-transparent p-0 transition-[opacity,background,color] duration-150 ease-fluid hover:border-none hover:bg-white/[0.08]",
+            "-my-1 flex size-6 shrink-0 items-center justify-center transition-[opacity,background,color] hover:bg-white/[0.08]",
             muted
-              ? "text-[#ff5577] opacity-100"
+              ? "text-red opacity-100"
               : "text-muted opacity-70 group-hover:opacity-100 hover:text-content",
           )}
           title={muted ? "Unmute on MIDI track" : "Mute on MIDI track"}
@@ -98,7 +101,7 @@ function InstrumentRow(props: {
           onClick={onToggleMute}
         >
           {muted ? <IconSoundOff /> : <IconSound />}
-        </button>
+        </Button>
       </div>
     </li>
   );
@@ -160,10 +163,10 @@ export function InstrumentList(props: {
   const extra = instruments.filter((name) => !given.has(name));
 
   return (
-    <aside className="card col-start-2 self-start px-4 pb-5 pt-4 max-[760px]:col-start-1 max-[760px]:-mx-7 max-[760px]:rounded-none max-[760px]:border-x-0 animate-rise [animation-delay:0.18s]">
+    <aside className="card col-start-2 self-start px-4 pb-5 pt-4 max-[760px]:col-start-1 max-[760px]:-mx-7 max-[760px]:border-x-0 animate-rise [animation-delay:0.18s]">
       {hasGiven ? (
         <>
-          <h2 className="m-0 mb-3 flex items-center text-base font-semibold">
+          <h2 className="m-0 mb-3 flex items-center text-base font-bold text-white">
             Given instruments
             <HelpHint>
               The instruments you specified. Greyed-out ones weren't detected in
@@ -182,7 +185,7 @@ export function InstrumentList(props: {
 
           {extra.length > 0 && (
             <>
-              <h2 className="m-0 mb-3 mt-5 text-base font-semibold">
+              <h2 className="m-0 mb-3 mt-5 text-base font-bold text-white">
                 More instruments{" "}
                 <HelpHint>
                   More instruments that the model detected in the audio, even
@@ -197,7 +200,7 @@ export function InstrumentList(props: {
         </>
       ) : (
         <>
-          <h2 className="m-0 mb-3 text-base font-semibold">Instruments</h2>
+          <h2 className="m-0 mb-3 text-base font-bold text-white">Instruments</h2>
           <ul className="m-0 flex list-none flex-col gap-0.5 p-0 text-sm">
             {instruments.map(row)}
           </ul>

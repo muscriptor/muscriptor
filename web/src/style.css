@@ -1,30 +1,53 @@
 @import "tailwindcss";
 
-/* ---- design tokens ----------------------------------------------------- */
-/* Exposed to utilities: bg-surface, text-muted, border-line, font-serif,
-   rounded-card, ease-fluid, animate-rise, etc. */
-@theme {
-  --color-bg: #0b0c10;
-  --color-surface: #121319;
-  --color-surface-2: #16171f;
-  --color-line: rgba(255, 255, 255, 0.07);
-  --color-line-strong: rgba(255, 255, 255, 0.13);
-  --color-content: #edecf0;
-  --color-muted: #aaacb9;
-  --color-faint: #5a5c68;
-  --color-accent: #ff5b7a; /* echoes the piano-roll playhead */
-  --color-accent-2: #ff8a5c;
-  --color-accent-soft: rgba(255, 91, 122, 0.13);
-  --color-accent-glow: rgba(255, 91, 122, 0.5);
-  --color-ok: #4ad295;
+/* ---- fonts (Satoshi, self-hosted — same face as kyutai.org) ------------- */
 
-  --radius-card: 12px;
+@font-face {
+  font-family: "Satoshi-Variable";
+  src:
+    url("/fonts/Satoshi-Variable.woff2") format("woff2"),
+    url("/fonts/Satoshi-Variable.woff") format("woff");
+  font-weight: 300 900;
+  font-display: swap;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: "Satoshi-Variable";
+  src:
+    url("/fonts/Satoshi-VariableItalic.woff2") format("woff2"),
+    url("/fonts/Satoshi-VariableItalic.woff") format("woff");
+  font-weight: 300 900;
+  font-display: swap;
+  font-style: italic;
+}
+
+/* ---- design tokens ----------------------------------------------------- */
+/* The kyutai.org palette: flat #121212 dark, green #39F2AE accent, gray
+   #343434 hairlines, square corners. Exposed to utilities: bg-surface,
+   text-muted, border-line, rounded-card, ease-fluid, animate-rise, etc. */
+@theme {
+  --color-bg: #121212;
+  --color-surface: #191919; /* darkgray */
+  --color-surface-2: #232323; /* mediumgray */
+  --color-line: #343434; /* gray */
+  --color-line-strong: #4d4d4d;
+  --color-content: #efefef; /* offwhite */
+  --color-muted: rgb(181, 188, 197); /* textgray */
+  --color-faint: #656565; /* sublightgray */
+  --color-accent: #39f2ae; /* green */
+  --color-accent-2: #f5ab4a; /* orange */
+  --color-accent-soft: rgba(57, 242, 174, 0.12);
+  --color-accent-glow: rgba(57, 242, 174, 0.5);
+  --color-ok: #39f2ae;
+  --color-red: #f55142;
+
+  --radius-card: 0px;
 
   --ease-fluid: cubic-bezier(0.22, 1, 0.36, 1);
 
-  --font-serif: "Instrument Serif", Georgia, "Times New Roman", serif;
-  --font-sans: "Hanken Grotesk", system-ui, -apple-system, sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  /* font-mono is left at Tailwind's default stack, same as kyutai.org. */
+  --font-sans: "Satoshi-Variable", system-ui, Avenir, Helvetica, Arial, sans-serif;
 
   --animate-rise: rise 0.7s var(--ease-fluid) both;
   --animate-drag-glow: drag-glow 1.7s var(--ease-fluid) infinite;
@@ -52,17 +75,6 @@
       transform: none;
     }
   }
-  @keyframes ping {
-    0% {
-      box-shadow: 0 0 0 0 var(--color-accent-glow);
-    }
-    70% {
-      box-shadow: 0 0 0 7px transparent;
-    }
-    100% {
-      box-shadow: 0 0 0 0 transparent;
-    }
-  }
 }
 
 /* ---- base -------------------------------------------------------------- */
@@ -70,110 +82,31 @@
 @layer base {
   html {
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
+    font-synthesis: none;
   }
 
   body {
     font-family: var(--font-sans);
-    min-height: 100vh;
-    color: var(--color-content);
-    background:
-      radial-gradient(
-        900px 500px at 88% -8%,
-        rgba(255, 91, 122, 0.1),
-        transparent 60%
-      ),
-      /* A very dark grey page base — lifted off the near-black --color-bg
-         (#0b0c10), which is kept for the dark insets inside the cards. */
-      #1b1c21;
-    background-attachment: fixed;
-  }
-
-  /* Default button look; specific buttons override via utilities. */
-  button {
-    font-family: var(--font-sans);
-    font-size: 13px;
     font-weight: 500;
-    color: var(--color-content);
-    background: var(--color-surface-2);
-    border: 1px solid var(--color-line-strong);
-    padding: 8px 16px;
-    border-radius: 9px;
-    cursor: pointer;
-    transition:
-      background 0.15s var(--ease-fluid),
-      border-color 0.15s var(--ease-fluid),
-      transform 0.08s var(--ease-fluid);
-  }
-  button:hover {
-    background: #20212b;
-    border-color: rgba(255, 255, 255, 0.2);
-  }
-  button:active {
-    transform: translateY(1px);
-  }
-  button:focus-visible {
-    outline: 2px solid var(--color-accent);
-    outline-offset: 2px;
-  }
-  button:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-    transform: none;
+    min-height: 100vh;
+    color: var(--color-muted);
+    background: var(--color-bg);
+    color-scheme: dark;
   }
 }
 
-/* ---- signature surfaces & buttons -------------------------------------- */
+/* ---- signature surfaces ------------------------------------------------- */
+/* Button styles live in components/Button.tsx (square / squareOff / slanted /
+   ghost — the kyutai.org SquareButton & SlantedButton kinds). */
 
-/* The frosted panel look shared by every card-like container. */
+/* Bordered panel on the flat background — kyutai boxes are square, hairline
+   #343434, unshadowed. */
 @utility card {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 120px),
-    var(--color-surface);
+  background: var(--color-bg);
   border: 1px solid var(--color-line);
-  border-radius: var(--radius-card);
-  box-shadow:
-    0 1px 0 rgba(255, 255, 255, 0.04) inset,
-    0 18px 40px -28px rgba(0, 0, 0, 0.9);
-}
-
-/* The glowing accent gradient used by the primary download / transcribe CTAs. */
-@utility btn-primary {
-  background: linear-gradient(180deg, var(--color-accent), #e84668);
-  border-color: transparent;
-  color: #fff;
-  font-weight: 600;
-  box-shadow:
-    0 0 0 1px rgba(255, 91, 122, 0.4),
-    0 8px 22px -10px var(--color-accent-glow);
-  &:hover:not(:disabled) {
-    filter: brightness(1.08);
-    background: linear-gradient(180deg, var(--color-accent), #e84668);
-    border-color: transparent;
-  }
-}
-
-/* ---- atmosphere (fixed overlays) --------------------------------------- */
-
-.grain {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 100;
-  opacity: 0.035;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-}
-
-/* Status dot: colour + ping keyed off the body's transcription state. */
-body[data-state="transcribing"] .status-dot {
-  background: var(--color-accent);
-  animation: ping 1.3s var(--ease-fluid) infinite;
-}
-body[data-state="done"] .status-dot {
-  background: var(--color-ok);
-}
-body[data-state="error"] .status-dot {
-  background: var(--color-accent);
+  border-radius: 0;
 }
 
 /* Drop overlay fades in via the body.drag class (set outside React). */
@@ -187,8 +120,7 @@ body.drag .drop-overlay {
   appearance: none;
   width: 170px;
   height: 4px;
-  border-radius: 999px;
-  background: linear-gradient(90deg, var(--color-muted), var(--color-accent));
+  background: linear-gradient(90deg, var(--color-faint), var(--color-accent));
   cursor: pointer;
 }
 /* On phones the slider gives up its fixed width and shrinks to whatever the
@@ -206,10 +138,9 @@ body.drag .drop-overlay {
 }
 .mix-slider::-webkit-slider-thumb {
   appearance: none;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: #fff;
+  width: 14px;
+  height: 14px;
+  background: var(--color-content);
   border: 2px solid var(--color-accent);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
   transition: transform 0.1s var(--ease-fluid);
@@ -218,10 +149,10 @@ body.drag .drop-overlay {
   transform: scale(1.15);
 }
 .mix-slider::-moz-range-thumb {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: #fff;
+  width: 14px;
+  height: 14px;
+  border-radius: 0;
+  background: var(--color-content);
   border: 2px solid var(--color-accent);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
 }

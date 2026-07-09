@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
+import { Button } from "./Button";
 import { label, scoreInstrument } from "../instruments";
 
 /**
@@ -100,40 +101,45 @@ export function ConditioningPanel(props: {
   }
 
   return (
-    <section className="card col-span-full px-5 pb-5 pt-4 animate-rise [animation-delay:0.24s]">
+    // relative z-10: keeps the suggestion popover above later siblings (the
+    // Transcribe button) even while the rise animation's transform holds this
+    // section in its own stacking context.
+    <section className="card relative z-10 col-span-full px-5 pb-5 pt-4 animate-rise [animation-delay:0.24s]">
       <div className="mb-3.5 flex items-start gap-3">
         <div className="flex flex-col gap-2">
-          <h2 className="m-0 text-lg font-semibold">
+          <h2 className="m-0 text-lg font-bold text-white">
             What instruments are there in this track?
           </h2>
-          <p className="text-gray">Optional. Fill in for a more accurate transcription.</p>
+          <p className="text-faint">Optional. Fill in for a more accurate transcription.</p>
         </div>
         <div className="ml-auto">
-          <button
+          <Button
             type="button"
-            className="px-3.5 py-1 text-xs"
+            size="text-xs"
+            pad="px-3.5 py-1"
             onClick={() => onChange(new Set())}
             disabled={selected.size === 0}
           >
             Clear
-          </button>
+          </Button>
         </div>
       </div>
 
       <div className="relative" ref={rootRef}>
         <div
-          className="flex min-h-11 cursor-text flex-wrap items-center gap-2 rounded-lg border border-line-strong bg-bg px-2.5 py-2 transition-colors duration-150 ease-fluid focus-within:border-accent"
+          className="flex min-h-11 cursor-text flex-wrap items-center gap-2 border border-line bg-bg px-2.5 py-2 transition-colors duration-150 ease-fluid focus-within:border-accent"
           onClick={() => rootRef.current?.querySelector("input")?.focus()}
         >
           {Array.from(selected).map((name) => (
             <span
-              className="inline-flex select-none items-center gap-1.5 rounded-md border border-accent-glow bg-accent-soft py-1 pl-3 pr-1.5 text-sm text-content"
+              className="inline-flex select-none items-center gap-1.5 border border-dashed border-accent bg-accent-soft py-1 pl-3 pr-1.5 text-sm text-content"
               key={name}
             >
               {label(name)}
-              <button
+              <Button
                 type="button"
-                className="grid size-4 place-content-center rounded border-none bg-transparent p-0 text-sm leading-none text-muted hover:border-none hover:bg-white/10 hover:text-content"
+                kind="ghost"
+                className="grid size-4 place-content-center text-sm leading-none text-muted hover:bg-white/10 hover:text-content"
                 aria-label={`Remove ${label(name)}`}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -141,7 +147,7 @@ export function ConditioningPanel(props: {
                 }}
               >
                 ×
-              </button>
+              </Button>
             </span>
           ))}
           <input
@@ -162,7 +168,7 @@ export function ConditioningPanel(props: {
 
         {open && suggestions.length > 0 && (
           <ul
-            className="absolute inset-x-0 top-[calc(100%+5px)] z-20 m-0 max-h-60 list-none overflow-y-auto rounded-lg border border-line-strong bg-surface-2 p-1 shadow-[0_18px_40px_-20px_rgba(0,0,0,0.9)]"
+            className="absolute inset-x-0 top-[calc(100%+5px)] z-20 m-0 max-h-60 list-none overflow-y-auto border border-line bg-bg py-1 shadow-md"
             role="listbox"
           >
             {suggestions.map((name, i) => (
@@ -171,8 +177,8 @@ export function ConditioningPanel(props: {
                 role="option"
                 aria-selected={i === highlight}
                 className={clsx(
-                  "cursor-pointer rounded-md px-2.5 py-2 text-sm",
-                  i === highlight ? "bg-white/[0.06] text-content" : "text-muted",
+                  "cursor-pointer px-4 py-2 text-sm",
+                  i === highlight ? "bg-accent text-black" : "text-muted",
                 )}
                 onMouseEnter={() => setHighlight(i)}
                 onMouseDown={(e) => {

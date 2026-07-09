@@ -5,22 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>muscriptor</title>
     <link rel="icon" type="image/svg+xml" href="/muscriptor-mark-v4-pink.svg" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <!-- Loaded non-render-blocking: the fallback stack paints instantly (this
-         tool may run offline), and the web fonts swap in once available. -->
+    <!-- Satoshi is self-hosted (same face as kyutai.org), so it works offline;
+         font-display: swap lets the fallback stack paint instantly. -->
     <link
-      href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
-      rel="stylesheet"
-      media="print"
-      onload="this.media='all'"
+      rel="preload"
+      href="/fonts/Satoshi-Variable.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
     />
-    <noscript>
-      <link
-        href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
-        rel="stylesheet"
-      />
-    </noscript>
   </head>
   <body data-state="idle">
     <div id="root"></div>

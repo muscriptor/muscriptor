@@ -282,8 +282,6 @@ export function App() {
 
   return (
     <>
-      <div className="grain" aria-hidden="true" />
-
       <header className="mx-auto flex max-w-7xl flex-wrap items-end justify-between gap-6 px-7 pb-6 pt-10 max-[760px]:pt-8 animate-rise">
         {/* Brand: the v2 mark (transparent PNG) + the wordmark as real text. */}
         <div

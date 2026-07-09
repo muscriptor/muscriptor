@@ -364,7 +364,7 @@ export class PianoRoll {
     ctx.clip();
 
     // Pitch grid: faint horizontal stripes for C notes
-    ctx.fillStyle = "#16161c";
+    ctx.fillStyle = "#121212";
     for (let p = PITCH_MIN; p <= PITCH_MAX; p++) {
       if (p % 12 === 0) {
         const y = (pitchTop - p) * rowH;
@@ -373,7 +373,7 @@ export class PianoRoll {
     }
 
     // Time grid: vertical lines every second.
-    ctx.strokeStyle = "#22222a";
+    ctx.strokeStyle = "#282828";
     ctx.lineWidth = 1;
     const startSec = Math.floor(offsetSec);
     const endSec = Math.ceil(offsetSec + viewSec);
@@ -448,7 +448,7 @@ export class PianoRoll {
 
     // Playhead
     const px = KEY_WIDTH + (this.playhead - offsetSec) * pxPerSec;
-    ctx.strokeStyle = "#ff5577";
+    ctx.strokeStyle = "#39f2ae";
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(px, 0);
@@ -469,16 +469,16 @@ export class PianoRoll {
   ) {
     const showLabels = rowH >= 8;
     if (showLabels) {
-      ctx.font = "10px sans-serif";
+      ctx.font = "10px Satoshi-Variable, sans-serif";
       ctx.textBaseline = "middle";
     }
     for (let p = PITCH_MIN; p <= PITCH_MAX; p++) {
       const y = (pitchTop - p) * rowH;
       if (y + rowH < 0 || y > H) continue;
-      ctx.fillStyle = isBlackKey(p) ? "#23232b" : "#cfd2dc";
+      ctx.fillStyle = isBlackKey(p) ? "#232323" : "#efefef";
       ctx.fillRect(0, y, KEY_WIDTH, rowH);
       // Thin separator between adjacent keys.
-      ctx.strokeStyle = "#16161c";
+      ctx.strokeStyle = "#121212";
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(0, y + 0.5);
@@ -486,7 +486,7 @@ export class PianoRoll {
       ctx.stroke();
       // Octave label on each C (MIDI 60 = C4).
       if (showLabels && p % 12 === 0) {
-        ctx.fillStyle = "#16161c";
+        ctx.fillStyle = "#121212";
         ctx.fillText(`C${p / 12 - 1}`, 4, y + rowH / 2);
       }
     }

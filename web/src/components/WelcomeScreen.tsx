@@ -6,6 +6,7 @@ import {
   type SetStateAction,
 } from "react";
 import clsx from "clsx";
+import { Button } from "./Button";
 import { ConditioningPanel } from "./ConditioningPanel";
 import type { AppError } from "../App";
 
@@ -112,7 +113,7 @@ export function WelcomeScreen(props: {
       >
         {error?.kind === "server" ? (
           <div className="flex flex-col items-center gap-3 px-8 py-16 text-center">
-            <p className="m-0 font-serif text-5xl leading-none text-content">
+            <p className="m-0 text-5xl font-bold leading-none text-white">
               unavailable
             </p>
             <p className="m-0 max-w-md text-base text-muted">{error.message}</p>
@@ -144,37 +145,40 @@ export function WelcomeScreen(props: {
                 </>
               )}
             </p>
-            <button
-              className="rounded-xl border-transparent bg-content px-7 py-3 text-base font-semibold text-[#15151b] hover:border-transparent hover:bg-white"
+            <Button
+              kind="slanted"
+              size="text-base"
+              pad="px-7 py-3"
               onClick={() => fileInputRef.current?.click()}
             >
               Select an audio file
-            </button>
-            <button
-              className="border-none bg-transparent px-1 py-0.5 text-sm text-muted underline underline-offset-4 hover:border-none hover:bg-transparent enabled:hover:text-content"
+            </Button>
+            <Button
+              kind="ghost"
+              className="px-1 py-0.5 text-sm text-muted underline underline-offset-4 enabled:hover:text-accent disabled:text-faint"
               onClick={handleExample}
               disabled={loadingExample}
             >
               {loadingExample ? "Loading example…" : "or try an example track"}
-            </button>
+            </Button>
           </div>
         ) : (
           <div className="flex flex-col items-start gap-2.5 px-8 py-7 max-[760px]:p-0">
             <p
-              className="m-0 max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-2xl leading-[1.1] text-content"
+              className="m-0 max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-2xl font-bold text-white"
               title={selectedFile.name}
             >
               {selectedFile.name}
             </p>
-            <button onClick={() => fileInputRef.current?.click()}>
+            <Button onClick={() => fileInputRef.current?.click()}>
               Choose a different file
-            </button>
+            </Button>
           </div>
         )}
       </section>
 
       {error?.kind === "file" && (
-        <p className="m-0 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+        <p className="m-0 border border-red/40 bg-red/10 px-4 py-3 text-sm text-red">
           {error.message}
         </p>
       )}
@@ -183,12 +187,9 @@ export function WelcomeScreen(props: {
         <>
           <ConditioningPanel selected={condSelected} onChange={onCondChange} />
           <div className="flex justify-end">
-            <button
-              className="btn-primary rounded-xl px-9 py-3 text-base"
-              onClick={onTranscribe}
-            >
+            <Button kind="slanted" size="text-base" pad="px-9 py-3" onClick={onTranscribe}>
               Transcribe
-            </button>
+            </Button>
           </div>
         </>
       )}

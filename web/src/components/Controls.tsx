@@ -1,6 +1,7 @@
 import { useEffect, useState, type RefObject } from "react";
 import clsx from "clsx";
 import type { AudioEngine } from "../audio";
+import { Button } from "./Button";
 import { IconPlay, IconPause } from "./icons";
 
 export function Controls(props: {
@@ -32,10 +33,10 @@ export function Controls(props: {
 
   return (
     <div className="col-span-full flex flex-wrap items-center gap-2.5 rounded-card border border-line bg-surface px-3.5 py-3 max-[760px]:border-0 max-[760px]:bg-transparent max-[760px]:p-0 animate-rise [animation-delay:0.06s]">
-      <button
+      <Button
         className={clsx(
           "inline-flex items-center gap-2",
-          playing && "border-accent bg-accent text-white hover:border-accent hover:bg-accent",
+          playing && "shadow-[0_0_10px_var(--color-accent)]",
         )}
         onClick={(e) => {
           e.currentTarget.blur();
@@ -44,9 +45,9 @@ export function Controls(props: {
       >
         {playing ? <IconPause /> : <IconPlay />}
         {playing ? "Pause" : "Play"}
-      </button>
-      <button
-        className={clsx("text-content", following && "border-accent hover:border-accent")}
+      </Button>
+      <Button
+        kind={following ? "square" : "squareOff"}
         aria-pressed={following}
         title={following ? "Stop following the playhead" : "Scroll along with the playhead"}
         onClick={(e) => {
@@ -55,9 +56,9 @@ export function Controls(props: {
         }}
       >
         Follow playhead
-      </button>
+      </Button>
       <span
-        className="rounded-md border border-line bg-bg px-2.5 py-1 font-mono text-sm tabular-nums text-muted"
+        className="border border-line bg-bg px-2.5 py-1 font-mono text-sm tabular-nums text-muted"
         ref={clockRef}
       >
         0.0s
