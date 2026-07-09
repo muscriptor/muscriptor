@@ -273,7 +273,9 @@ export class AudioEngine {
   private startWavSource(at: number) {
     this.stopWavSource();
     if (!this.wavBuffer) return;
-    const offset = Tone.getTransport().seconds;
+    // It's important to use .getSecondsAtTime() and not .seconds because otherwise we get
+    // a random ~25ms desync between the wav and the transcription
+    const offset = Tone.getTransport().getSecondsAtTime(at);
     if (offset >= this.wavBuffer.duration) return;
     const src = this.ctx.createBufferSource();
     src.buffer = this.wavBuffer;
