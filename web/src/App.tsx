@@ -129,7 +129,7 @@ export function App() {
   // "Transcribe another file" (also the wordmark, on the transcribe screen):
   // confirm (the work is about to be discarded), then tear down and go back.
   function transcribeAnother() {
-    if (!window.confirm("Discard this transcription and start over?")) return;
+    if (!window.confirm("Discard this transcription and transcribe something else?")) return;
     setSelectedFile(null);
     resetToWelcome();
   }
@@ -155,7 +155,7 @@ export function App() {
     // first, then tear everything down (stop playback, clear the roll) so the
     // music doesn't keep playing behind the welcome screen.
     if (screen === "transcribe") {
-      if (!window.confirm("Discard this transcription and start over with the dropped file?"))
+      if (!window.confirm("Discard this transcription and transcribe the dropped file?"))
         return;
       resetToWelcome();
     }

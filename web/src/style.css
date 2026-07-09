@@ -191,6 +191,15 @@ body.drag .drop-overlay {
   background: linear-gradient(90deg, var(--color-muted), var(--color-accent));
   cursor: pointer;
 }
+/* On phones the slider gives up its fixed width and shrinks to whatever the
+   controls row has left, keeping the stereo toggle on the same line. */
+@media (max-width: 760px) {
+  .mix-slider {
+    width: auto;
+    min-width: 0;
+    flex: 1;
+  }
+}
 .mix-slider:disabled {
   cursor: not-allowed;
   filter: grayscale(1);

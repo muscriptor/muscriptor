@@ -104,7 +104,7 @@ export function OutputBar(props: {
     "block w-full rounded-none border-0 bg-transparent px-3 py-2 text-left text-[13px] font-normal text-content hover:bg-[#20212b]";
 
   return (
-    <div className="col-span-full flex flex-wrap items-center gap-3 rounded-card border border-line bg-surface px-3.5 py-3">
+    <div className="col-span-full flex flex-wrap items-center gap-3 rounded-card border border-line bg-surface px-3.5 py-3 max-[760px]:border-0 max-[760px]:bg-transparent max-[760px]:p-0">
       {transcribing && (
         <div className="flex min-w-48 flex-1 items-center gap-3">
           <div className="h-1 flex-1 overflow-hidden rounded-full bg-bg">
@@ -184,7 +184,7 @@ export function OutputBar(props: {
             onTranscribeAnother();
           }}
         >
-          Transcribe another file
+          Transcribe another
         </button>
       </div>
     </div>

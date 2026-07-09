@@ -98,7 +98,18 @@ export function WelcomeScreen(props: {
         }}
       />
 
-      <section className={clsx("card p-0", dragging && "animate-drag-glow")}>
+      {/* Once a file is picked the card chrome disappears on mobile — the file
+          name + button sit directly on the page, like the transcribe screen's
+          control rows. bg-none clears the card's gradient layer. */}
+      <section
+        className={clsx(
+          "card p-0 max-[760px]:border-0",
+          error?.kind !== "server" &&
+            selectedFile !== null &&
+            "max-[760px]:bg-none max-[760px]:bg-transparent max-[760px]:shadow-none",
+          dragging && "animate-drag-glow",
+        )}
+      >
         {error?.kind === "server" ? (
           <div className="flex flex-col items-center gap-3 px-8 py-16 text-center">
             <p className="m-0 font-serif text-5xl leading-none text-content">
@@ -148,7 +159,7 @@ export function WelcomeScreen(props: {
             </button>
           </div>
         ) : (
-          <div className="flex flex-col items-start gap-2.5 px-8 py-7">
+          <div className="flex flex-col items-start gap-2.5 px-8 py-7 max-[760px]:p-0">
             <p
               className="m-0 max-w-full overflow-hidden text-ellipsis whitespace-nowrap text-2xl leading-[1.1] text-content"
               title={selectedFile.name}
