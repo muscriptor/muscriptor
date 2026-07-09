@@ -38,7 +38,7 @@
       <use href="#wave" stroke-linecap="square"/>
       <path mask="url(#waveClearance)" d="M347 142.5H690 M362 202.5H690 M443 262.5H690 M347 322.5H690 M347 382.5H690"/>
     </g>
-    <use href="#stems" stroke="#ff5b7a" stroke-width="10" fill="none" stroke-linecap="round"/>
-    <use href="#noteFills" fill="#ff5b7a"/>
+    <use href="#stems" stroke="#39f2ae" stroke-width="10" fill="none" stroke-linecap="round"/>
+    <use href="#noteFills" fill="#39f2ae"/>
   </g>
 </svg>

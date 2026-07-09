@@ -28,6 +28,6 @@
     <use href="#wave" stroke-linecap="square"/>
     <path mask="url(#waveClearance)" d="M340 288H470"/>
   </g>
-  <use href="#stems" stroke="#ff5b7a" stroke-width="16" fill="none" stroke-linecap="round"/>
-  <use href="#noteFills" fill="#ff5b7a"/>
+  <use href="#stems" stroke="#39f2ae" stroke-width="16" fill="none" stroke-linecap="round"/>
+  <use href="#noteFills" fill="#39f2ae"/>
 </svg>
