@@ -61,7 +61,7 @@ services:
         - "traefik.http.services.backend.loadbalancer.server.port=80"
         - "traefik.http.routers.backend.priority=10"
         - "prometheus-port=80"
-      replicas: 1
+      replicas: 3
       resources:
         reservations:
           generic_resources:
