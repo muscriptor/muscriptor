@@ -288,15 +288,14 @@ distributed under its own (MIT) license.
 
 ## Citation
 
-<!-- TODO: fill in the BibTeX entry when the paper is out:
 ```bibtex
-@techreport{muscriptor2026,
-  title  = {MuScriptor: ...},
-  author = {...},
-  year   = {2026},
-  url    = {...},
+@misc{rouard2026muscriptoropenmodelmultiinstrument,
+      title={MuScriptor: An Open Model for Multi-Instrument Music Transcription}, 
+      author={Simon Rouard and Michael Krause and Axel Roebel and Carl-Johann Simon-Gabriel and Alexandre Défossez},
+      year={2026},
+      eprint={2607.08168},
+      archivePrefix={arXiv},
+      primaryClass={cs.SD},
+      url={https://arxiv.org/abs/2607.08168}, 
 }
 ```
--->
-
-The paper is coming soon — a citation entry will be added here with it.
