@@ -46,18 +46,17 @@ from muscriptor.tokenizer.notes import (
     validate_notes,
 )
 from muscriptor.utils.audio import load_audio, resample
+from muscriptor.utils.device import best_device, sync
 from muscriptor.utils.midi import notes_to_midi
 
 
 @contextlib.contextmanager
 def _timed(label: str, store: list[tuple[str, float]] | None = None):
     """Print and (optionally) record how long a block of work takes."""
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
+    sync()
     t0 = time.perf_counter()
     yield
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
+    sync()
     dt = time.perf_counter() - t0
     print(f"[muscriptor] {label}: {dt:.2f}s", file=sys.stderr)
     if store is not None:
@@ -202,7 +201,9 @@ def _build_model(device: torch.device, cfg: _ModelConfig = _DEFAULT_CONFIG) -> L
         device=device,
     )
 
-    autocast = None
+    # Disabled off-CUDA: on MPS half precision comes from native fp16 weights
+    # (see load_model) — autocast there is measurably slower than fp32.
+    autocast = TorchAutocast(enabled=False)
     if device.type == "cuda":
         autocast = TorchAutocast(enabled=True, device_type="cuda", dtype=torch.float16)
 
@@ -268,6 +269,7 @@ class TranscriptionModel:
         cls,
         weights_path: str | Path | None = None,
         device: str | torch.device | None = None,
+        dtype: str | torch.dtype | None = None,
     ) -> "TranscriptionModel":
         """Load model weights and return a ready-to-use TranscriptionModel.
 
@@ -277,12 +279,25 @@ class TranscriptionModel:
                 path, an ``hf://`` or ``https://`` URL, or None.  If None, the
                 default ``medium`` variant is downloaded from HuggingFace.
                 Remote URLs are cached under ~/.cache/muscriptor/.
-            device: Torch device to use.  Defaults to CUDA if available.
+            device: Torch device to use.  Defaults to CUDA if available,
+                then MPS (Apple Silicon), then CPU.
+            dtype: Transformer weight/compute dtype: ``"float32"``,
+                ``"float16"``, ``"bfloat16"`` (or the torch dtypes). ``None``
+                picks per device: float16 on MPS (halves memory traffic —
+                decode is bandwidth-bound), float32 elsewhere (CUDA gets fp16
+                compute via autocast instead). The conditioning pipeline
+                (mel-spectrogram/class embeddings) always stays in fp32; its
+                outputs are cast at the transformer boundary.
         """
         if device is None:
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            device = best_device()
         elif isinstance(device, str):
             device = torch.device(device)
+
+        if dtype is None:
+            dtype = torch.float16 if device.type == "mps" else torch.float32
+        elif isinstance(dtype, str):
+            dtype = getattr(torch, dtype)
 
         source = _resolve_source(weights_path)
         weights_path = download_if_necessary(source)
@@ -293,6 +308,11 @@ class TranscriptionModel:
         state_dict = _remap_single_codebook_keys(state_dict)
         model.load_state_dict(state_dict)
         model.to(device)
+        if dtype != torch.float32:
+            model.to(dtype)
+            # Conditioners keep fp32 numerics (log-mel of quiet passages
+            # underflows in fp16); LMModel.forward casts their outputs.
+            model.condition_provider.float()
 
         tokenizer = MT3Tokenizer(
             instrument_vocabulary="MT3_FULL_PLUS",
@@ -416,8 +436,7 @@ class TranscriptionModel:
             frame_rate=self._tokenizer.frame_rate,
         )
 
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
+        sync()
         print(
             f"[muscriptor] generate total: {time.perf_counter() - t_gen:.2f}s",
             file=sys.stderr,
@@ -439,7 +458,9 @@ class TranscriptionModel:
         instead of silently dropping the forcing.
         """
         if batch_size is None:
-            return 1 if prelude_forcing else (4 if self._device.type == "cuda" else 1)
+            if prelude_forcing:
+                return 1
+            return 4 if self._device.type in ("cuda", "mps") else 1
         if prelude_forcing and batch_size > 1:
             raise ValueError(
                 f"batch_size={batch_size} disables prelude forcing, which lowers "

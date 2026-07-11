@@ -19,6 +19,7 @@ from torch.nn import functional as F
 from einops import rearrange
 
 from muscriptor.modules.mel_spectrogram import _MelSpectrogram
+from muscriptor.utils.device import sync
 from muscriptor.utils.sampling import length_to_mask
 
 
@@ -160,8 +161,7 @@ class MelSpectrogramConditioner(nn.Module):
     def _mel_embedding(self, x: WavCondition) -> torch.Tensor:
         if x.wav.shape[-1] == 1:
             return torch.zeros(x.wav.shape[0], 1, self.dim, device=self.device)
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
+        sync()
         t0 = time.perf_counter()
         with torch.no_grad():
             wav = x.wav
@@ -175,8 +175,7 @@ class MelSpectrogramConditioner(nn.Module):
                 )
             if self.log_scale:
                 mel = torch.log(mel + self.eps)
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
+        sync()
         print(
             f"[muscriptor] mel-spec ({wav.shape[0]} × {wav.shape[-1]} samples): "
             f"{time.perf_counter() - t0:.3f}s"
