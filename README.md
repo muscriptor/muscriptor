@@ -55,9 +55,14 @@ uvx muscriptor transcribe
 ```  
 
 > **Intel Macs:** PyTorch stopped shipping Intel-mac (x86_64) wheels after
-> torch 2.2.2, which supports Python ≤ 3.12. `uvx muscriptor` handles this
-> automatically (it re-launches itself with Python 3.12 when needed); if you
-> install with pip instead, use Python 3.10–3.12.
+> torch 2.2.2, which supports Python ≤ 3.12, so you must tell uvx to use
+> Python 3.12:
+>
+> ```bash
+> uvx --python 3.12 muscriptor serve
+> ```
+>
+> If you install with pip/uv instead, use Python 3.10–3.12.
 
 
 ## Installation
