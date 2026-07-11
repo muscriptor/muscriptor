@@ -13,8 +13,11 @@ import { label, scoreInstrument } from "../instruments";
 export function ConditioningPanel(props: {
   selected: Set<string>;
   onChange: (next: Set<string>) => void;
+  /** Forbid unlisted instruments outright instead of just hinting the model. */
+  strict: boolean;
+  onStrictChange: (next: boolean) => void;
 }) {
-  const { selected, onChange } = props;
+  const { selected, onChange, strict, onStrictChange } = props;
   const [available, setAvailable] = useState<string[]>([]);
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -187,6 +190,26 @@ export function ConditioningPanel(props: {
           </ul>
         )}
       </div>
+
+      {/* Only meaningful once instruments are listed — the server rejects
+          strict mode with an empty list, so disable (and ignore) it then. */}
+      <label
+        className={clsx(
+          "mt-3 flex select-none items-center gap-2 text-sm",
+          selected.size === 0
+            ? "cursor-not-allowed text-faint"
+            : "cursor-pointer text-muted",
+        )}
+      >
+        <input
+          type="checkbox"
+          className="accent-current"
+          checked={strict && selected.size > 0}
+          disabled={selected.size === 0}
+          onChange={(e) => onStrictChange(e.target.checked)}
+        />
+        Only these instruments (forbid the model from using any other)
+      </label>
     </section>
   );
 }

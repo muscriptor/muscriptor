@@ -101,6 +101,8 @@ def create_app(model: TranscriptionModel, web_dir: str | Path | None = None) -> 
     async def transcribe(
         file: Annotated[UploadFile, File()],
         instruments: Annotated[list[str], Form(default_factory=list)],
+        strict_instruments: Annotated[bool, Form()] = False,
+        tempo_bpm: Annotated[float, Form()] = 120.0,
     ) -> StreamingResponse:
         data = await file.read()
         # PCM WAV goes through the stdlib reader (keeps WAV decoding byte-for-byte
@@ -125,6 +127,16 @@ def create_app(model: TranscriptionModel, web_dir: str | Path | None = None) -> 
             raise HTTPException(
                 status_code=400,
                 detail=f"unknown instrument name(s): {', '.join(unknown)}",
+            )
+        if strict_instruments and not instruments:
+            raise HTTPException(
+                status_code=400,
+                detail="strict_instruments requires a non-empty instruments list",
+            )
+        if not 10.0 <= tempo_bpm <= 999.0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"tempo_bpm must be between 10 and 999, got {tempo_bpm}",
             )
 
         # Preempt whoever holds the lock, then wait for it. The short acquire
@@ -169,6 +181,7 @@ def create_app(model: TranscriptionModel, web_dir: str | Path | None = None) -> 
                 for ev in model.transcribe(
                     (wav, sr),
                     instruments=instruments or None,
+                    strict_instruments=strict_instruments,
                     batch_size=1,
                     no_eos_is_ok=True,
                 ):
@@ -197,7 +210,9 @@ def create_app(model: TranscriptionModel, web_dir: str | Path | None = None) -> 
                 # with the bytes base64-encoded.
                 if cancel.is_set():
                     return
-                midi_bytes = model.events_to_midi_bytes(iter(events))
+                midi_bytes = model.events_to_midi_bytes(
+                    iter(events), tempo_bpm=tempo_bpm
+                )
                 midi_b64 = base64.b64encode(midi_bytes).decode("ascii")
                 payload = json.dumps({"type": "midi", "data": midi_b64})
                 yield f"data: {payload}\n\n"

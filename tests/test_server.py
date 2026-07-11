@@ -218,3 +218,80 @@ def test_transcribe_rejects_undecodable_file():
         files={"file": ("mystery.mp3", b"\x00\x01 not audio \x02\x03", "audio/mpeg")},
     )
     assert resp.status_code == 400
+
+
+def test_transcribe_strict_without_instruments_is_rejected(tmp_path):
+    """strict_instruments with an empty instrument list is a client error."""
+    model = make_model()
+    client = TestClient(create_app(model))
+    resp = client.post(
+        "/transcribe",
+        files={"file": ("silent.wav", _wav_bytes(tmp_path), "audio/wav")},
+        data={"strict_instruments": "true"},
+    )
+    assert resp.status_code == 400
+    assert "strict_instruments" in resp.json()["detail"]
+    model.transcribe.assert_not_called()
+
+
+def test_transcribe_passes_strict_instruments(tmp_path):
+    model = make_model()
+    client = TestClient(create_app(model))
+    resp = client.post(
+        "/transcribe",
+        files={"file": ("silent.wav", _wav_bytes(tmp_path), "audio/wav")},
+        data={"instruments": ["violin", "drums"], "strict_instruments": "true"},
+    )
+    assert resp.status_code == 200
+    kwargs = model.transcribe.call_args.kwargs
+    assert kwargs["instruments"] == ["violin", "drums"]
+    assert kwargs["strict_instruments"] is True
+
+
+def test_transcribe_strict_defaults_to_false(tmp_path):
+    model = make_model()
+    client = TestClient(create_app(model))
+    resp = client.post(
+        "/transcribe",
+        files={"file": ("silent.wav", _wav_bytes(tmp_path), "audio/wav")},
+        data={"instruments": ["violin"]},
+    )
+    assert resp.status_code == 200
+    assert model.transcribe.call_args.kwargs["strict_instruments"] is False
+
+
+def test_transcribe_passes_tempo_bpm(tmp_path):
+    model = make_model()
+    client = TestClient(create_app(model))
+    resp = client.post(
+        "/transcribe",
+        files={"file": ("silent.wav", _wav_bytes(tmp_path), "audio/wav")},
+        data={"tempo_bpm": "87.5"},
+    )
+    assert resp.status_code == 200
+    assert model.events_to_midi_bytes.call_args.kwargs["tempo_bpm"] == 87.5
+
+
+def test_transcribe_tempo_bpm_defaults_to_120(tmp_path):
+    model = make_model()
+    client = TestClient(create_app(model))
+    resp = client.post(
+        "/transcribe",
+        files={"file": ("silent.wav", _wav_bytes(tmp_path), "audio/wav")},
+    )
+    assert resp.status_code == 200
+    assert model.events_to_midi_bytes.call_args.kwargs["tempo_bpm"] == 120.0
+
+
+def test_transcribe_rejects_out_of_range_tempo(tmp_path):
+    model = make_model()
+    client = TestClient(create_app(model))
+    for bad in ("0", "-3", "5000"):
+        resp = client.post(
+            "/transcribe",
+            files={"file": ("silent.wav", _wav_bytes(tmp_path), "audio/wav")},
+            data={"tempo_bpm": bad},
+        )
+        assert resp.status_code == 400, bad
+        assert "tempo_bpm" in resp.json()["detail"]
+    model.transcribe.assert_not_called()

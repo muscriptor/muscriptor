@@ -165,6 +165,32 @@ def transcribe(
             ),
         ),
     ] = None,
+    strict_instruments: Annotated[
+        bool,
+        typer.Option(
+            "--strict-instruments",
+            help=(
+                "Forbid instruments not listed in --instruments from being "
+                "decoded at all, instead of only conditioning the model on "
+                "the list (requires --instruments)."
+            ),
+        ),
+    ] = False,
+    tempo_bpm: Annotated[
+        float | None,
+        typer.Option(
+            "--tempo-bpm",
+            min=10.0,
+            max=999.0,
+            help=(
+                "Tempo (in BPM) stamped into the output MIDI file "
+                "(default: 120). Note timing stays wall-clock accurate at "
+                "any value; set it to the track's real BPM so beats land on "
+                "the grid when importing into a DAW. Only valid with "
+                "--format midi."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Transcribe an audio file to MIDI."""
     instrument_names: list[str] | None = None
@@ -180,6 +206,12 @@ def transcribe(
             )
             raise typer.Exit(1)
         typer.echo(f"Instruments: {', '.join(instrument_names)}", err=True)
+
+    if strict_instruments and not instrument_names:
+        typer.echo(
+            "Error: --strict-instruments requires --instruments", err=True
+        )
+        raise typer.Exit(1)
 
     if not audio_file.exists():
         typer.echo(f"Error: file not found: {audio_file}", err=True)
@@ -211,18 +243,25 @@ def transcribe(
         typer.echo("Error: --auralize requires --format midi", err=True)
         raise typer.Exit(1)
 
+    if tempo_bpm is not None and format != OutputFormat.midi:
+        typer.echo("Error: --tempo-bpm requires --format midi", err=True)
+        raise typer.Exit(1)
+
     kwargs = dict(
         audio=audio_file,
         use_sampling=sampling,
         temperature=temperature,
         cfg_coef=cfg_coef,
         instruments=instrument_names,
+        strict_instruments=strict_instruments,
         batch_size=batch_size,
         no_eos_is_ok=not strict_eos,
         beam_size=beam_size,
     )
 
     if format == OutputFormat.midi:
+        if tempo_bpm is not None:
+            kwargs["tempo_bpm"] = tempo_bpm
         midi_bytes = model.transcribe_to_midi(**kwargs)
         if is_stdout:
             sys.stdout.buffer.write(midi_bytes)

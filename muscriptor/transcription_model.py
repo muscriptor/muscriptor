@@ -308,6 +308,7 @@ class TranscriptionModel:
         temperature: float = 1.0,
         cfg_coef: float = 1.0,
         instruments: list[str] | None = None,
+        strict_instruments: bool = False,
         batch_size: int | None = None,
         no_eos_is_ok: bool = True,
         beam_size: int = 1,
@@ -319,6 +320,12 @@ class TranscriptionModel:
         within each chunk events arrive in temporal order, and all events
         from chunk N are yielded before any event from chunk N+1.
 
+        ``instruments`` conditions the model on the expected instrument groups
+        (advisory: the model can still decode others). With
+        ``strict_instruments=True`` the listed instruments also become a hard
+        constraint — every program/drum token outside the list is masked out
+        during generation, so no other instrument can appear in the output.
+
         Interleaved with the note events are coarse :class:`ProgressEvent`
         anchors (``completed`` of ``total`` chunks): one up front with
         ``completed == 0``, then one as each chunk finishes. Consumers that
@@ -327,11 +334,23 @@ class TranscriptionModel:
         if batch_size is None:
             batch_size = 4 if self._device.type == "cuda" else 1
 
+        if strict_instruments and not instruments:
+            raise ValueError(
+                "strict_instruments=True requires a non-empty `instruments` list"
+            )
+
         # Exact names only here — the CLI resolves abbreviations before
         # calling in (resolve_instrument_names).
         instrument_group = (
             instrument_group_from_names(instruments) if instruments else None
         )
+        forbidden_tokens = None
+        if strict_instruments:
+            forbidden_tokens = torch.tensor(
+                self._tokenizer.forbidden_token_ids(instruments),
+                device=self._device,
+                dtype=torch.long,
+            )
 
         timings: list[tuple[str, float]] = []
         t_total = time.perf_counter()
@@ -385,6 +404,7 @@ class TranscriptionModel:
                 cfg_coef,
                 no_eos_is_ok,
                 beam_size,
+                forbidden_tokens,
             ),
             self._tokenizer._vocab,
             self._instrument_for_program,
@@ -415,6 +435,7 @@ class TranscriptionModel:
         cfg_coef: float,
         no_eos_is_ok: bool,
         beam_size: int = 1,
+        forbidden_tokens: torch.Tensor | None = None,
     ) -> Iterator[int | ChunkBoundary | ProgressEvent]:
         """Generate tokens and yield them per chunk, as soon as they are ready.
 
@@ -454,6 +475,7 @@ class TranscriptionModel:
                 cfg_coef=cfg_coef,
                 early_stop_on_token=eos_id,
                 beam_size=beam_size,
+                forbidden_tokens=forbidden_tokens,
             ):
                 row = step.tolist()  # one token per chunk: [n]
                 for j in range(n):
@@ -507,25 +529,36 @@ class TranscriptionModel:
         temperature: float = 1.0,
         cfg_coef: float = 1.0,
         instruments: list[str] | None = None,
+        strict_instruments: bool = False,
         batch_size: int | None = None,
         no_eos_is_ok: bool = True,
         beam_size: int = 1,
+        tempo_bpm: float = 120.0,
     ) -> bytes:
-        """Same as :meth:`transcribe` but returns a MIDI file as bytes."""
+        """Same as :meth:`transcribe` but returns a MIDI file as bytes.
+
+        ``tempo_bpm`` is stamped into the MIDI file. Note timing is wall-clock
+        accurate at any value (seconds are converted to ticks at that same
+        tempo); set it to the track's real BPM so beats land on the grid when
+        the file is imported into a DAW.
+        """
         events = self.transcribe(
             audio,
             use_sampling=use_sampling,
             temperature=temperature,
             cfg_coef=cfg_coef,
             instruments=instruments,
+            strict_instruments=strict_instruments,
             batch_size=batch_size,
             no_eos_is_ok=no_eos_is_ok,
             beam_size=beam_size,
         )
-        return self.events_to_midi_bytes(events)
+        return self.events_to_midi_bytes(events, tempo_bpm=tempo_bpm)
 
     def events_to_midi_bytes(
-        self, events: Iterator[NoteStartEvent | NoteEndEvent | ProgressEvent]
+        self,
+        events: Iterator[NoteStartEvent | NoteEndEvent | ProgressEvent],
+        tempo_bpm: float = 120.0,
     ) -> bytes:
         """Reassemble Notes from a NoteStart/NoteEnd stream and serialize MIDI.
 
@@ -563,7 +596,7 @@ class TranscriptionModel:
         # don't drift from earlier reference outputs.
         notes = validate_notes(notes, fix=True)
         notes = trim_overlapping_notes(notes, sort=True)
-        midi = notes_to_midi(notes, program_names=program_names)
+        midi = notes_to_midi(notes, tempo_bpm=tempo_bpm, program_names=program_names)
         buf = io.BytesIO()
         midi.save(file=buf)
         return buf.getvalue()
