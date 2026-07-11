@@ -1,0 +1,8 @@
+{
+  "model_type": "muscriptor",
+  "variant": "large",
+  "dim": 1536,
+  "num_heads": 24,
+  "num_layers": 48,
+  "card": 1395
+}
