@@ -43,7 +43,7 @@ impl ScaledEmb {
         let emb = self.inner.forward(&x.clamp(0, i64::MAX)?)?;
         // Zero out positions where input was negative
         let ones = Tensor::new(1.0f32, x.device())?.to_dtype(emb.dtype())?;
-        emb * (ones - neg)?
+        emb.broadcast_mul(&(ones.broadcast_sub(&neg))?)
     }
 }
 
@@ -64,7 +64,7 @@ impl Attn {
         Ok(Self {
             dh: d / nh, nh,
             in_w: vb.get((three_d, d), "in_proj_weight")?,
-            out_w: vb.get((d, d), "out_proj_weight")?,
+            out_w: vb.get((d, d), "out_proj.weight")?,
         })
     }
 
@@ -79,7 +79,7 @@ impl Attn {
         let nh = self.nh;
         let dh = self.dh;
 
-        let p = x.matmul(&self.in_w.t()?)?.reshape((b, t, 3usize, nh, dh))?;
+        let p = matmul_3d(x, &self.in_w.t()?)?.reshape((b, t, 3usize, nh, dh))?;
         let q = p.narrow(2, 0, 1)?.squeeze(2)?.transpose(1, 2)?;
         let k = p.narrow(2, 1, 1)?.squeeze(2)?.transpose(1, 2)?;
         let v = p.narrow(2, 2, 1)?.squeeze(2)?.transpose(1, 2)?;
@@ -113,13 +113,25 @@ impl Attn {
         let mask = Tensor::from_vec(mask_data, (tq, tk), dev)?.to_dtype(dt)?;
         let one = Tensor::new(1.0f32, dev)?.to_dtype(dt)?;
         let ni = Tensor::new(f32::NEG_INFINITY, dev)?;
-        let am = (one - &mask)?.broadcast_mul(&ni)?;
-        a = (a.broadcast_mul(&mask)? + am)?;
+        let am = (one.broadcast_sub(&mask))?.broadcast_mul(&ni)?;
+        a = (a.broadcast_mul(&mask)?.broadcast_add(&am))?;
 
         let a = candle_nn::ops::softmax(&a, 3)?;
         let o = a.matmul(&v)?;
         let o = o.transpose(1, 2)?.reshape((b, tq, nh * dh))?;
-        o.matmul(&self.out_w.t()?)
+        matmul_3d(&o, &self.out_w.t()?)
+    }
+}
+
+fn matmul_3d(x: &Tensor, wt: &Tensor) -> Result<Tensor> {
+    let nd = x.dims().len();
+    if nd <= 2 {
+        x.matmul(wt)
+    } else {
+        let (b, t, d) = x.dims3()?;
+        let x2 = x.reshape((b * t, d))?;
+        let y2 = x2.matmul(wt)?;
+        y2.reshape((b, t, wt.dim(1)?))
     }
 }
 
@@ -134,7 +146,16 @@ impl LinNB {
         Ok(Self { w })
     }
     fn forward(&self, x: &Tensor) -> Result<Tensor> {
-        x.matmul(&self.w.t()?)
+        let wt = self.w.t()?;
+        let nd = x.dims().len();
+        if nd <= 2 {
+            x.matmul(&wt)
+        } else {
+            let (b, t, d) = x.dims3()?;
+            let x2 = x.reshape((b * t, d))?;
+            let y2 = x2.matmul(&wt)?;
+            y2.reshape((b, t, wt.dim(1)?))
+        }
     }
 }
 
@@ -150,7 +171,7 @@ impl LinB {
         Ok(Self { w, b })
     }
     fn forward(&self, x: &Tensor) -> Result<Tensor> {
-        let y = x.matmul(&self.w.t()?)?;
+        let y = matmul_3d(x, &self.w.t()?)?;
         y.broadcast_add(&self.b)
     }
 }
@@ -167,12 +188,11 @@ impl LN {
         Ok(Self { w, b, eps })
     }
     fn forward(&self, x: &Tensor) -> Result<Tensor> {
-        // LayerNorm: y = gamma * (x - mean) / sqrt(var + eps) + beta
-        let mean = x.mean_keepdim(1)?;
+        let mean = x.mean_keepdim(2)?;
         let x_center = x.broadcast_sub(&mean)?;
-        let var = x_center.sqr()?.mean_keepdim(1)?;
+        let var = x_center.sqr()?.mean_keepdim(2)?;
         let eps_t = Tensor::new(self.eps as f32, var.device())?;
-        let denom = (var + eps_t)?.sqrt()?;
+        let denom = (var.broadcast_add(&eps_t))?.sqrt()?;
         let x_norm = x_center.broadcast_div(&denom)?;
         x_norm.broadcast_mul(&self.w.unsqueeze(0)?)?
             .broadcast_add(&self.b.unsqueeze(0)?)
@@ -248,14 +268,21 @@ impl TF {
 // Conditioners
 // ---------------------------------------------------------------------------
 
-struct MelC { proj: LinB }
+struct MelC { proj: LinB, dim: usize }
 impl MelC {
     fn new(od: usize, vb: &VarBuilder) -> Result<Self> {
-        Ok(Self { proj: LinB::new(512, od, vb, "output_proj")? })
+        Ok(Self { proj: LinB::new(512, od, vb, "output_proj")?, dim: od })
     }
     fn forward(&self, m: &Tensor) -> Result<(Tensor, Tensor)> {
-        let e = self.proj.forward(m)?;
-        let mask = Tensor::ones(e.dims2()?, e.dtype(), e.device())?;
+        let nd = m.dims().len();
+        let e = if nd == 3 {
+            let (b, t, _) = m.dims3()?;
+            let flat = m.reshape((b * t, 512))?;
+            self.proj.forward(&flat)?.reshape((b, t, self.dim))?
+        } else {
+            self.proj.forward(m)?
+        };
+        let mask = Tensor::ones(e.dims(), e.dtype(), e.device())?;
         Ok((e, mask))
     }
 }
@@ -285,7 +312,7 @@ impl ClsC {
     }
     fn forward(&self, x: &Tensor) -> Result<(Tensor, Tensor)> {
         let e = self.emb.forward(x)?;
-        let mask = Tensor::ones(e.dims2()?, e.dtype(), e.device())?;
+        let mask = Tensor::ones(e.dims(), e.dtype(), e.device())?;
         Ok((e, mask))
     }
 }
@@ -313,7 +340,12 @@ impl LMModel {
         let mut tensors = HashMap::new();
         for (k, v) in &tensors_map {
             let nk = k.replacen("emb.0.", "emb.", 1).replacen("linears.0.", "linear.", 1);
+            log::debug!("  tensor {} -> {}", k, nk);
             tensors.insert(nk, v.clone());
+        }
+        log::info!("Loaded {} tensors", tensors.len());
+        for (k, _) in &tensors {
+            log::debug!("  available: {}", k);
         }
         let vb = VarBuilder::from_tensors(tensors, DType::F32, device);
         Self::new(&vb, cfg)
@@ -321,7 +353,7 @@ impl LMModel {
 
     pub fn new(vb: &VarBuilder, cfg: &ModelConfig) -> Result<Self> {
         Ok(Self {
-            emb: ScaledEmb::new(cfg.card + 1, cfg.dim, vb)?,
+            emb: ScaledEmb::new(cfg.card + 1, cfg.dim, &vb.pp("emb"))?,
             tf: TF::new(cfg, &vb.pp("transformer"))?,
             on: LN::new(cfg.dim, 1e-5, vb, "out_norm")?,
             lin: LinNB::new(cfg.dim, cfg.card, vb, "linear")?,
@@ -386,19 +418,16 @@ impl LMModel {
             let logits = logits.narrow(1, sl - 1, 1)?.squeeze(1)?;
             let logits = logits.to_dtype(DType::F32)?;
 
-            // Mask OOV tokens (index >= card) by setting them to -inf
-            let mask_data: Vec<f32> = (0..self.card).map(|_| 0.0f32)
-                .chain((self.card..1395).map(|_| f32::NEG_INFINITY))
-                .collect();
-            let mask_t = Tensor::from_vec(mask_data, (1, 1395), dev)?;
-            let logits = (logits + mask_t)?;
+            // (No OOV mask needed: the linear layer outputs card logits,
+            //  so indices >= card already have no logit.)
+            let logits = logits;
 
             let next = if sample && temp > 0.0 {
                 let temp_t = Tensor::new(temp as f32, dev)?;
                 let probs = candle_nn::ops::softmax(&(&logits / temp_t)?, 1)?;
                 sample_token(&probs, dev)?.to_scalar::<i64>()?
             } else {
-                logits.argmax(1)?.squeeze(0)?.to_scalar::<i64>()?
+                logits.argmax(1)?.squeeze(0)?.to_dtype(DType::I64)?.to_scalar::<i64>()?
             };
             out.push(next);
         }
@@ -414,12 +443,12 @@ fn sample_token(probs: &Tensor, dev: &Device) -> Result<Tensor> {
         let row = probs.narrow(0, i, 1)?.squeeze(0)?.to_vec1::<f32>()?;
         let r: f32 = fastrand::f32();
         let mut cum = 0.0f32;
-        let mut chosen = vs - 1;
+        let mut chosen = (vs - 1) as i64;
         for (j, &v) in row.iter().enumerate() {
             cum += v;
-            if r < cum { chosen = j; break; }
+            if r < cum { chosen = j as i64; break; }
         }
-        result.push(chosen as u32);
+        result.push(chosen);
     }
-    Tensor::from_vec(result, (b, 1), dev)?.to_dtype(DType::I64)
+    Tensor::from_vec(result, (b, 1), dev)
 }
