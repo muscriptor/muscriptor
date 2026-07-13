@@ -4,6 +4,7 @@
 !headache_mastered.mid
 *.wav
 *.mp3
+!headache_by_lost_deposit_1min.mp3
 *.ogg
 *.sf2
 web/node_modules
