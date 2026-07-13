@@ -80,9 +80,9 @@ impl Attn {
         let dh = self.dh;
 
         let p = matmul_3d(x, &self.in_w.t()?)?.reshape((b, t, 3usize, nh, dh))?;
-        let q = p.narrow(2, 0, 1)?.squeeze(2)?.transpose(1, 2)?;
-        let k = p.narrow(2, 1, 1)?.squeeze(2)?.transpose(1, 2)?;
-        let v = p.narrow(2, 2, 1)?.squeeze(2)?.transpose(1, 2)?;
+        let q = p.narrow(2, 0, 1)?.squeeze(2)?.transpose(1, 2)?.contiguous()?;
+        let k = p.narrow(2, 1, 1)?.squeeze(2)?.transpose(1, 2)?.contiguous()?;
+        let v = p.narrow(2, 2, 1)?.squeeze(2)?.transpose(1, 2)?.contiguous()?;
 
         let (k, v) = if let (Some(kk), Some(vv)) = (kc.as_mut(), vc.as_mut()) {
             let s = *off;
@@ -331,6 +331,7 @@ pub struct LMModel {
     pub dc: ClsC,
     pub card: usize,
     pub dim: usize,
+    pub device: Device,
 }
 
 impl LMModel {
@@ -348,7 +349,9 @@ impl LMModel {
             log::debug!("  available: {}", k);
         }
         let vb = VarBuilder::from_tensors(tensors, DType::F32, device);
-        Self::new(&vb, cfg)
+        let mut m = Self::new(&vb, cfg)?;
+        m.device = device.clone();
+        Ok(m)
     }
 
     pub fn new(vb: &VarBuilder, cfg: &ModelConfig) -> Result<Self> {
@@ -361,6 +364,7 @@ impl LMModel {
             ic: ClsC::new(1000, cfg.dim, &vb.pp("condition_provider.conditioners.instrument_group"), "embed")?,
             dc: ClsC::new(4, cfg.dim, &vb.pp("condition_provider.conditioners.dataset_name"), "embed")?,
             card: cfg.card, dim: cfg.dim,
+            device: Device::Cpu,
         })
     }
 

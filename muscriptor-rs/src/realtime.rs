@@ -69,21 +69,20 @@ impl RealtimeTranscriber {
         let t_frames = log_mel.len();
         let mel_flat: Vec<f32> = log_mel.into_iter().flatten().collect();
         let mel_t = candle_core::Tensor::from_vec(
-            mel_flat, (1, t_frames, 512), &candle_core::Device::Cpu,
+            mel_flat, (1, t_frames, 512), &self.model.device,
         )?;
-
         let inst_t = self.model.ic.tokenize(
             &[self.inst_tokens.as_ref().map(|s| {
                 s.split_whitespace()
                     .filter_map(|v| v.parse::<i64>().ok())
                     .collect()
             })],
-            &candle_core::Device::Cpu,
+            &self.model.device,
         )?;
         let ds_t = self
             .model
             .dc
-            .tokenize(&[None], &candle_core::Device::Cpu)?;
+            .tokenize(&[None], &self.model.device)?;
 
         let tokens = self.model.generate(
             &mel_t, &inst_t, &ds_t,

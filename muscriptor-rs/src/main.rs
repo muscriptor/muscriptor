@@ -153,7 +153,6 @@ fn run_file(
     let max_shift = 1001;
     let vocab = build_event_vocab(max_shift);
     let mel_spec = mel::MelSpectrogram::new(16000, 2048, 160, 512);
-    let device = load_device(cli.cpu);
 
     let inst_tokens = inst_names.as_ref().map(|names| instrument_group_from_names(names).unwrap_or_default());
 
@@ -174,9 +173,9 @@ fn run_file(
         &[inst_tokens.as_ref().map(|s| {
             s.split_whitespace().filter_map(|v| v.parse::<i64>().ok()).collect()
         })],
-        &device,
+        &model.device,
     )?;
-    let ds_t = model.dc.tokenize(&[None], &device)?;
+    let ds_t = model.dc.tokenize(&[None], &model.device)?;
 
     for chunk_idx in 0..num_chunks {
         log::info!("Chunk {}/{}", chunk_idx + 1, num_chunks);
@@ -190,7 +189,7 @@ fn run_file(
         let chunk_log_mel = mel_spec.log_mel(&chunk_mel_raw, 1e-6);
         let t_frames = chunk_log_mel.len();
         let mel_flat: Vec<f32> = chunk_log_mel.into_iter().flatten().collect();
-        let mel_t = Tensor::from_vec(mel_flat, (1, t_frames, 512), &device)?;
+        let mel_t = Tensor::from_vec(mel_flat, (1, t_frames, 512), &model.device)?;
         log::info!("  mel: {} frames ({:.2}ms)", t_frames, t0.elapsed().as_secs_f64());
 
         let t0 = Instant::now();
