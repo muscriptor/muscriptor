@@ -218,11 +218,16 @@ class TranscriptionModel:
             batch_size: int | None = None,
             no_eos_is_ok: bool = True,
             beam_size: int = 1,
+            tempo_bpm: float = 120.0,
         ) -> bytes:
         """Same as `transcribe`, but returns a MIDI file as bytes instead
         of a generator of events. Useful when you want to save the MIDI
         to disk or send it over a network without going through the
         event stream.
+
+        `tempo_bpm` is stamped into the MIDI file. Note timing is
+        wall-clock accurate at any value; set it to the track's real BPM
+        so beats land on the grid when importing into a DAW.
         """
 ```
 
@@ -246,6 +251,11 @@ muscriptor transcribe audio.wav --instruments acoustic_piano,drums
 # Get the event stream instead of MIDI: json (single array) or
 # jsonl (one event per line, streamed while transcribing); -o - = stdout
 muscriptor transcribe audio.wav --format jsonl -o -
+
+# Stamp the track's real tempo into the MIDI file (default: 120). Timing is
+# wall-clock accurate either way; matching the real BPM makes beats land on
+# the grid when the file is imported into a DAW.
+muscriptor transcribe audio.wav --tempo-bpm 174
 
 # Decoding options: temperature sampling, or beam search (slower, can be
 # more accurate)

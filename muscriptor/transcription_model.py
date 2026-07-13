@@ -510,8 +510,15 @@ class TranscriptionModel:
         batch_size: int | None = None,
         no_eos_is_ok: bool = True,
         beam_size: int = 1,
+        tempo_bpm: float = 120.0,
     ) -> bytes:
-        """Same as :meth:`transcribe` but returns a MIDI file as bytes."""
+        """Same as :meth:`transcribe` but returns a MIDI file as bytes.
+
+        ``tempo_bpm`` is stamped into the MIDI file. Note timing is wall-clock
+        accurate at any value (seconds are converted to ticks at that same
+        tempo); set it to the track's real BPM so beats land on the grid when
+        the file is imported into a DAW.
+        """
         events = self.transcribe(
             audio,
             use_sampling=use_sampling,
@@ -522,10 +529,12 @@ class TranscriptionModel:
             no_eos_is_ok=no_eos_is_ok,
             beam_size=beam_size,
         )
-        return self.events_to_midi_bytes(events)
+        return self.events_to_midi_bytes(events, tempo_bpm=tempo_bpm)
 
     def events_to_midi_bytes(
-        self, events: Iterator[NoteStartEvent | NoteEndEvent | ProgressEvent]
+        self,
+        events: Iterator[NoteStartEvent | NoteEndEvent | ProgressEvent],
+        tempo_bpm: float = 120.0,
     ) -> bytes:
         """Reassemble Notes from a NoteStart/NoteEnd stream and serialize MIDI.
 
@@ -563,7 +572,7 @@ class TranscriptionModel:
         # don't drift from earlier reference outputs.
         notes = validate_notes(notes, fix=True)
         notes = trim_overlapping_notes(notes, sort=True)
-        midi = notes_to_midi(notes, program_names=program_names)
+        midi = notes_to_midi(notes, tempo_bpm=tempo_bpm, program_names=program_names)
         buf = io.BytesIO()
         midi.save(file=buf)
         return buf.getvalue()

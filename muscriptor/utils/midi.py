@@ -8,10 +8,14 @@ from muscriptor.tokenizer.notes import Note, note2note_event, note_event2midi
 def notes_to_midi(
     notes: list[Note],
     velocity: int = 100,
-    tempo_bpm: int = 120,
+    tempo_bpm: float = 120,
     program_names: dict[int, str] | None = None,
 ):
     """Convert a list of Note objects to a mido MidiFile.
+
+    `tempo_bpm` is stamped into the file and used to convert the notes'
+    wall-clock seconds to ticks, so playback timing is identical at any
+    value — it only decides where the beat grid falls.
 
     `program_names` maps program numbers to human-readable track names
     (see note_event2midi).
@@ -31,7 +35,7 @@ def save_midi(
     notes: list[Note],
     path: str | Path,
     velocity: int = 100,
-    tempo_bpm: int = 120,
+    tempo_bpm: float = 120,
     program_names: dict[int, str] | None = None,
 ) -> None:
     """Save a list of Note objects as a MIDI file."""

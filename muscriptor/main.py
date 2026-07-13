@@ -165,6 +165,21 @@ def transcribe(
             ),
         ),
     ] = None,
+    tempo_bpm: Annotated[
+        float | None,
+        typer.Option(
+            "--tempo-bpm",
+            min=10.0,
+            max=999.0,
+            help=(
+                "Tempo (in BPM) stamped into the output MIDI file "
+                "(default: 120). Note timing stays wall-clock accurate at "
+                "any value; set it to the track's real BPM so beats land on "
+                "the grid when importing into a DAW. Only valid with "
+                "--format midi."
+            ),
+        ),
+    ] = None,
 ) -> None:
     """Transcribe an audio file to MIDI."""
     instrument_names: list[str] | None = None
@@ -211,6 +226,10 @@ def transcribe(
         typer.echo("Error: --auralize requires --format midi", err=True)
         raise typer.Exit(1)
 
+    if tempo_bpm is not None and format != OutputFormat.midi:
+        typer.echo("Error: --tempo-bpm requires --format midi", err=True)
+        raise typer.Exit(1)
+
     kwargs = dict(
         audio=audio_file,
         use_sampling=sampling,
@@ -223,6 +242,8 @@ def transcribe(
     )
 
     if format == OutputFormat.midi:
+        if tempo_bpm is not None:
+            kwargs["tempo_bpm"] = tempo_bpm
         midi_bytes = model.transcribe_to_midi(**kwargs)
         if is_stdout:
             sys.stdout.buffer.write(midi_bytes)

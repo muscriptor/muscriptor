@@ -23,6 +23,9 @@ export function WelcomeScreen(props: {
   onUseExample: () => Promise<void>;
   condSelected: Set<string>;
   onCondChange: (next: Set<string>) => void;
+  /** Raw text of the MIDI-tempo field (parsed/validated at submit time). */
+  tempoBpm: string;
+  onTempoBpmChange: (next: string) => void;
   onTranscribe: () => void;
   /** True while a file is dragged over the window; swaps the prompt in place. */
   dragging: boolean;
@@ -36,6 +39,8 @@ export function WelcomeScreen(props: {
     onUseExample,
     condSelected,
     onCondChange,
+    tempoBpm,
+    onTempoBpmChange,
     onTranscribe,
     dragging,
     error,
@@ -171,7 +176,27 @@ export function WelcomeScreen(props: {
       {error?.kind !== "server" && selectedFile !== null && (
         <>
           <ConditioningPanel selected={condSelected} onChange={onCondChange} />
-          <div className="flex justify-end">
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <label
+              className="flex items-center gap-2 text-sm text-muted"
+              title={
+                "Tempo stamped into the downloaded MIDI file. Timing stays " +
+                "wall-clock accurate at any value — set your track's real BPM " +
+                "so beats land on your DAW's grid."
+              }
+            >
+              MIDI tempo
+              <input
+                type="number"
+                className="w-24 rounded-lg border border-line-strong bg-bg px-2.5 py-2 text-sm text-content outline-none transition-colors duration-150 ease-fluid focus:border-accent"
+                min={10}
+                max={999}
+                step={0.1}
+                value={tempoBpm}
+                onChange={(e) => onTempoBpmChange(e.target.value)}
+              />
+              BPM
+            </label>
             <button
               className="btn-primary rounded-xl px-9 py-3 text-base"
               onClick={onTranscribe}

@@ -61,6 +61,9 @@ export function App() {
   const [stereo, setStereo] = useState(false);
   const [userScrolled, setUserScrolled] = useState(false);
   const [condSelected, setCondSelected] = useState<Set<string>>(() => new Set());
+  // Tempo (BPM) stamped into the downloaded MIDI. Kept as the raw input string
+  // so the field can be freely edited; parsed/validated at submit time.
+  const [tempoBpm, setTempoBpm] = useState("120");
   // True while a file is being dragged over the window. On the welcome screen
   // this swaps the panel's prompt in place instead of showing the overlay.
   const [dragging, setDragging] = useState(false);
@@ -70,6 +73,8 @@ export function App() {
   // re-creating `transcribe` whenever the selection changes.
   const condRef = useRef(condSelected);
   condRef.current = condSelected;
+  const tempoRef = useRef(tempoBpm);
+  tempoRef.current = tempoBpm;
   // Read inside the per-frame loop (which only re-subscribes on `audio`) so the
   // transcribed-so-far tint is only drawn while a transcription is running.
   const appStateRef = useRef(appState);
@@ -79,6 +84,12 @@ export function App() {
     audio,
     rollRef,
     getConditioning: () => Array.from(condRef.current),
+    // null when the field doesn't hold a usable BPM — the server then uses
+    // its 120 default (matching the field's initial value).
+    getTempoBpm: () => {
+      const v = Number.parseFloat(tempoRef.current);
+      return Number.isFinite(v) && v >= 10 && v <= 999 ? v : null;
+    },
     progress,
     // A failed transcription bounces back to the welcome screen with a message.
     onError: (message) => {
@@ -325,6 +336,8 @@ export function App() {
           onUseExample={useExample}
           condSelected={condSelected}
           onCondChange={setCondSelected}
+          tempoBpm={tempoBpm}
+          onTempoBpmChange={setTempoBpm}
           onTranscribe={startTranscription}
           dragging={dragging}
           error={error}
