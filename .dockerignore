@@ -3,6 +3,7 @@
 *.safetensors
 *.wav
 *.mp3
+!web/public/headache_by_lost_deposit_1min.mp3
 *.ogg
 *.mid
 .venv

@@ -104,13 +104,9 @@ class StreamingMultiheadAttention(StatefulModule):
                 q_t, k_t, v_t, is_causal=True, dropout_p=0.0
             )
         else:
-            mask = torch.ones(T_q, T_k, dtype=torch.bool, device=query.device).tril(
-                T_k - T_q
-            )
-            attn_bias = torch.zeros(T_q, T_k, dtype=q.dtype, device=query.device)
-            attn_bias.masked_fill_(~mask, float("-inf"))
-            x = F.scaled_dot_product_attention(
-                q_t, k_t, v_t, attn_mask=attn_bias, dropout_p=0.0
+            # Unused in practice
+            raise NotImplementedError(
+                f"Streaming attention with T_q={T_q} and T_k={T_k} is not supported; use T_q=1 or T_q=T_k."
             )
         x = x.transpose(1, 2).to(dtype)
 
