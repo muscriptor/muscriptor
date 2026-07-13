@@ -162,6 +162,7 @@ class TranscriptionModel:
             temperature: float = 1.0,
             cfg_coef: float = 1.0,
             instruments: list[str] | None = None,
+            strict_instruments: bool = False,
             batch_size: int | None = None,
             no_eos_is_ok: bool = True,
             beam_size: int = 1,
@@ -180,7 +181,13 @@ class TranscriptionModel:
                 condition the model on (exact names, e.g.
                 ["acoustic_piano", "drums"]). Run `muscriptor
                 list-instruments` (or GET /instruments on the server)
-                for the full list of valid names.
+                for the full list of valid names. Advisory by default:
+                the model is conditioned on the list but can still
+                decode other instruments.
+            strict_instruments: Make `instruments` a hard constraint:
+                every program/drum token outside the list is masked out
+                during generation, so no unlisted instrument can appear
+                in the output. Requires a non-empty `instruments` list.
             batch_size: Number of 5-second chunks processed per forward
                 pass. `None` (default) picks a value based on the device:
                 1 on CPU, 4 on GPU. Use `batch_size=1` for the lowest
@@ -215,6 +222,7 @@ class TranscriptionModel:
             temperature: float = 1.0,
             cfg_coef: float = 1.0,
             instruments: list[str] | None = None,
+            strict_instruments: bool = False,
             batch_size: int | None = None,
             no_eos_is_ok: bool = True,
             beam_size: int = 1,
@@ -242,6 +250,11 @@ muscriptor transcribe audio.wav --model large
 # and unambiguous abbreviations work: 'timp,dist' = timpani + distorted
 # electric guitar
 muscriptor transcribe audio.wav --instruments acoustic_piano,drums
+
+# By default --instruments is advisory (the model is conditioned on the list
+# but can still decode others). Add --strict-instruments to forbid unlisted
+# instruments outright: their tokens are masked out during generation.
+muscriptor transcribe audio.wav --instruments acoustic_piano,drums --strict-instruments
 
 # Get the event stream instead of MIDI: json (single array) or
 # jsonl (one event per line, streamed while transcribing); -o - = stdout

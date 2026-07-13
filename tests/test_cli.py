@@ -23,6 +23,9 @@ class _FakeInner:
 
 
 class _FakeModel:
+    # kwargs of the most recent transcribe() call (reset by `patched_model`).
+    last_kwargs: dict | None = None
+
     def __init__(self):
         self._model = _FakeInner()
 
@@ -30,13 +33,18 @@ class _FakeModel:
     def load_model(cls, **_):
         return cls()
 
-    def transcribe(self, **_):
+    def transcribe(self, **kwargs):
+        type(self).last_kwargs = kwargs
         s0 = NoteStartEvent(pitch=60, start_time=0.0, index=0, instrument="piano")
         s1 = NoteStartEvent(pitch=64, start_time=0.5, index=1, instrument="guitar")
         yield s0
         yield NoteEndEvent(end_time=0.4, start_event=s0)
         yield s1
         yield NoteEndEvent(end_time=0.9, start_event=s1)
+
+    def transcribe_to_midi(self, **kwargs):
+        type(self).last_kwargs = kwargs
+        return b"FAKE_MIDI"
 
 
 @pytest.fixture
@@ -52,6 +60,7 @@ def fake_audio(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def patched_model(monkeypatch):
+    _FakeModel.last_kwargs = None
     monkeypatch.setattr(main_mod, "TranscriptionModel", _FakeModel)
 
 
@@ -140,3 +149,35 @@ def test_jsonl_to_file_keeps_progress_on_stderr(patched_model, fake_audio, tmp_p
             {"type": "end", "end_time": 0.9, "start_event_index": 1},
         ]
     ]
+
+
+def test_strict_instruments_requires_instruments(patched_model, fake_audio):
+    runner = CliRunner()
+    result = runner.invoke(
+        main_mod.app,
+        ["transcribe", str(fake_audio), "--strict-instruments", "-f", "jsonl", "-o", "-"],
+    )
+    assert result.exit_code == 1
+    assert "--strict-instruments requires --instruments" in result.stderr
+    assert _FakeModel.last_kwargs is None
+
+
+def test_strict_instruments_passed_to_model(patched_model, fake_audio):
+    runner = CliRunner()
+    result = runner.invoke(
+        main_mod.app,
+        [
+            "transcribe",
+            str(fake_audio),
+            "--instruments",
+            "violin,drums",
+            "--strict-instruments",
+            "-f",
+            "jsonl",
+            "-o",
+            "-",
+        ],
+    )
+    assert result.exit_code == 0, result.stderr
+    assert _FakeModel.last_kwargs["instruments"] == ["violin", "drums"]
+    assert _FakeModel.last_kwargs["strict_instruments"] is True

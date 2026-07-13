@@ -101,6 +101,7 @@ def create_app(model: TranscriptionModel, web_dir: str | Path | None = None) -> 
     async def transcribe(
         file: Annotated[UploadFile, File()],
         instruments: Annotated[list[str], Form(default_factory=list)],
+        strict_instruments: Annotated[bool, Form()] = False,
     ) -> StreamingResponse:
         data = await file.read()
         # PCM WAV goes through the stdlib reader (keeps WAV decoding byte-for-byte
@@ -125,6 +126,11 @@ def create_app(model: TranscriptionModel, web_dir: str | Path | None = None) -> 
             raise HTTPException(
                 status_code=400,
                 detail=f"unknown instrument name(s): {', '.join(unknown)}",
+            )
+        if strict_instruments and not instruments:
+            raise HTTPException(
+                status_code=400,
+                detail="strict_instruments requires a non-empty instruments list",
             )
 
         # Preempt whoever holds the lock, then wait for it. The short acquire
@@ -169,6 +175,7 @@ def create_app(model: TranscriptionModel, web_dir: str | Path | None = None) -> 
                 for ev in model.transcribe(
                     (wav, sr),
                     instruments=instruments or None,
+                    strict_instruments=strict_instruments,
                     batch_size=1,
                     no_eos_is_ok=True,
                 ):

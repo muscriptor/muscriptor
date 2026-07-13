@@ -61,6 +61,9 @@ export function App() {
   const [stereo, setStereo] = useState(false);
   const [userScrolled, setUserScrolled] = useState(false);
   const [condSelected, setCondSelected] = useState<Set<string>>(() => new Set());
+  // Strict mode: the selected instruments are a hard constraint (the server
+  // masks every other instrument's tokens) rather than a hint.
+  const [condStrict, setCondStrict] = useState(false);
   // True while a file is being dragged over the window. On the welcome screen
   // this swaps the panel's prompt in place instead of showing the overlay.
   const [dragging, setDragging] = useState(false);
@@ -70,6 +73,8 @@ export function App() {
   // re-creating `transcribe` whenever the selection changes.
   const condRef = useRef(condSelected);
   condRef.current = condSelected;
+  const condStrictRef = useRef(condStrict);
+  condStrictRef.current = condStrict;
   // Read inside the per-frame loop (which only re-subscribes on `audio`) so the
   // transcribed-so-far tint is only drawn while a transcription is running.
   const appStateRef = useRef(appState);
@@ -79,6 +84,7 @@ export function App() {
     audio,
     rollRef,
     getConditioning: () => Array.from(condRef.current),
+    getStrict: () => condStrictRef.current,
     progress,
     // A failed transcription bounces back to the welcome screen with a message.
     onError: (message) => {
@@ -325,6 +331,8 @@ export function App() {
           onUseExample={useExample}
           condSelected={condSelected}
           onCondChange={setCondSelected}
+          condStrict={condStrict}
+          onCondStrictChange={setCondStrict}
           onTranscribe={startTranscription}
           dragging={dragging}
           error={error}

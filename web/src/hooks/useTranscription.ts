@@ -35,6 +35,8 @@ export interface TranscriptionDeps {
   rollRef: RefObject<PianoRoll | null>;
   /** Conditioning instruments selected in the UI, read at submit time. */
   getConditioning: () => string[];
+  /** Whether the conditioning is strict (unlisted instruments forbidden). */
+  getStrict: () => boolean;
   /** Smooths chunk-completion anchors into a live progress fraction + ETA. */
   progress: ProgressEstimator;
   /** Called when a (non-superseded) transcription fails, so the UI can recover.
@@ -65,6 +67,7 @@ export function useTranscription(deps: TranscriptionDeps) {
     audio,
     rollRef,
     getConditioning,
+    getStrict,
     progress,
     onError,
     setAppState,
@@ -176,11 +179,16 @@ export function useTranscription(deps: TranscriptionDeps) {
     let maxEnd = 0;
     try {
       const cond = getConditioning();
-      const extra = cond.length > 0 ? { instruments: cond } : undefined;
+      const extra: Record<string, string | string[]> = {};
+      if (cond.length > 0) {
+        extra.instruments = cond;
+        // strict only makes sense with a non-empty list (the server 400s otherwise).
+        if (getStrict()) extra.strict_instruments = "true";
+      }
       for await (const raw of streamTranscribe(
         "/transcribe",
         file,
-        extra,
+        Object.keys(extra).length > 0 ? extra : undefined,
         controller.signal,
       )) {
         // A newer upload took over while we were awaiting — drop this event so
