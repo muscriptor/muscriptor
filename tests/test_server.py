@@ -295,3 +295,113 @@ def test_transcribe_rejects_out_of_range_tempo(tmp_path):
         assert resp.status_code == 400, bad
         assert "tempo_bpm" in resp.json()["detail"]
     model.transcribe.assert_not_called()
+
+
+def test_transcribe_passes_sampling_params(tmp_path):
+    model = make_model()
+    client = TestClient(create_app(model))
+    resp = client.post(
+        "/transcribe",
+        files={"file": ("silent.wav", _wav_bytes(tmp_path), "audio/wav")},
+        data={"use_sampling": "true", "temperature": "0.8", "cfg_coef": "3.0"},
+    )
+    assert resp.status_code == 200
+    kwargs = model.transcribe.call_args.kwargs
+    assert kwargs["use_sampling"] is True
+    assert kwargs["temperature"] == 0.8
+    assert kwargs["cfg_coef"] == 3.0
+
+
+def test_transcribe_sampling_defaults(tmp_path):
+    model = make_model()
+    client = TestClient(create_app(model))
+    resp = client.post(
+        "/transcribe",
+        files={"file": ("silent.wav", _wav_bytes(tmp_path), "audio/wav")},
+    )
+    assert resp.status_code == 200
+    kwargs = model.transcribe.call_args.kwargs
+    assert kwargs["use_sampling"] is False
+    assert kwargs["temperature"] == 1.0
+    assert kwargs["cfg_coef"] == 1.0
+
+
+def test_transcribe_rejects_out_of_range_temperature(tmp_path):
+    model = make_model()
+    client = TestClient(create_app(model))
+    for bad in ("0", "-1", "100"):
+        resp = client.post(
+            "/transcribe",
+            files={"file": ("silent.wav", _wav_bytes(tmp_path), "audio/wav")},
+            data={"temperature": bad},
+        )
+        assert resp.status_code == 400, bad
+        assert "temperature" in resp.json()["detail"]
+    model.transcribe.assert_not_called()
+
+
+def test_transcribe_rejects_out_of_range_cfg_coef(tmp_path):
+    model = make_model()
+    client = TestClient(create_app(model))
+    for bad in ("-1", "100"):
+        resp = client.post(
+            "/transcribe",
+            files={"file": ("silent.wav", _wav_bytes(tmp_path), "audio/wav")},
+            data={"cfg_coef": bad},
+        )
+        assert resp.status_code == 400, bad
+        assert "cfg_coef" in resp.json()["detail"]
+    model.transcribe.assert_not_called()
+
+
+def test_config_reports_max_beam_size():
+    client = TestClient(create_app(make_model(), max_beam_size=4))
+    assert client.get("/config").json() == {"max_beam_size": 4}
+    # Default cap is 1 (beam search disabled).
+    client = TestClient(create_app(make_model()))
+    assert client.get("/config").json() == {"max_beam_size": 1}
+
+
+def test_create_app_rejects_bad_max_beam_size():
+    import pytest
+
+    with pytest.raises(ValueError, match="max_beam_size"):
+        create_app(make_model(), max_beam_size=0)
+
+
+def test_transcribe_passes_beam_size(tmp_path):
+    model = make_model()
+    client = TestClient(create_app(model, max_beam_size=4))
+    resp = client.post(
+        "/transcribe",
+        files={"file": ("silent.wav", _wav_bytes(tmp_path), "audio/wav")},
+        data={"beam_size": "3"},
+    )
+    assert resp.status_code == 200
+    assert model.transcribe.call_args.kwargs["beam_size"] == 3
+
+
+def test_transcribe_beam_size_defaults_to_1(tmp_path):
+    model = make_model()
+    client = TestClient(create_app(model))
+    resp = client.post(
+        "/transcribe",
+        files={"file": ("silent.wav", _wav_bytes(tmp_path), "audio/wav")},
+    )
+    assert resp.status_code == 200
+    assert model.transcribe.call_args.kwargs["beam_size"] == 1
+
+
+def test_transcribe_rejects_beam_size_over_cap(tmp_path):
+    """beam_size beyond the server cap (including the default cap of 1) → 400."""
+    for max_beam, bad in [(1, "2"), (4, "5"), (4, "0")]:
+        model = make_model()
+        client = TestClient(create_app(model, max_beam_size=max_beam))
+        resp = client.post(
+            "/transcribe",
+            files={"file": ("silent.wav", _wav_bytes(tmp_path), "audio/wav")},
+            data={"beam_size": bad},
+        )
+        assert resp.status_code == 400, (max_beam, bad)
+        assert "beam_size" in resp.json()["detail"]
+        model.transcribe.assert_not_called()

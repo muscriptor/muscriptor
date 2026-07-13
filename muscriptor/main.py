@@ -345,6 +345,18 @@ def serve(
             "--device", "-d", help="Device: 'auto', 'cpu', 'cuda', 'cuda:0', …"
         ),
     ] = "auto",
+    max_beam_size: Annotated[
+        int,
+        typer.Option(
+            "--max-beam-size",
+            min=1,
+            help=(
+                "Largest beam_size a request may ask for. Beam search multiplies "
+                "the decoding cost, so keep this at 1 on public deployments; "
+                "the web UI hides the control when it is 1."
+            ),
+        ),
+    ] = 1,
 ):
     """Run the HTTP transcription server (POST /transcribe → SSE event stream)."""
     import uvicorn
@@ -355,7 +367,11 @@ def serve(
     typer.echo("Loading model…")
     model = _load_model(model_path, _device)
     web_dir = Path(__file__).resolve().parent / "web_dist"
-    fastapi_app = create_app(model, web_dir=web_dir if web_dir.is_dir() else None)
+    fastapi_app = create_app(
+        model,
+        web_dir=web_dir if web_dir.is_dir() else None,
+        max_beam_size=max_beam_size,
+    )
     uvicorn.run(fastapi_app, host=host, port=port)
 
 

@@ -67,6 +67,16 @@ export function App() {
   // Tempo (BPM) stamped into the downloaded MIDI. Kept as the raw input string
   // so the field can be freely edited; parsed/validated at submit time.
   const [tempoBpm, setTempoBpm] = useState("120");
+  // Decoding options: temperature sampling (vs greedy) and classifier-free
+  // guidance. The numbers are raw input strings, parsed at submit time like
+  // the tempo.
+  const [useSampling, setUseSampling] = useState(false);
+  const [temperature, setTemperature] = useState("1.0");
+  const [cfgCoef, setCfgCoef] = useState("1.0");
+  // Beam search width. The server caps it (GET /config); the control is
+  // hidden — and the parameter never sent — while the cap is 1.
+  const [beamSize, setBeamSize] = useState("1");
+  const [maxBeamSize, setMaxBeamSize] = useState(1);
   // True while a file is being dragged over the window. On the welcome screen
   // this swaps the panel's prompt in place instead of showing the overlay.
   const [dragging, setDragging] = useState(false);
@@ -80,6 +90,37 @@ export function App() {
   condStrictRef.current = condStrict;
   const tempoRef = useRef(tempoBpm);
   tempoRef.current = tempoBpm;
+  const useSamplingRef = useRef(useSampling);
+  useSamplingRef.current = useSampling;
+  const temperatureRef = useRef(temperature);
+  temperatureRef.current = temperature;
+  const cfgCoefRef = useRef(cfgCoef);
+  cfgCoefRef.current = cfgCoef;
+  const beamSizeRef = useRef(beamSize);
+  beamSizeRef.current = beamSize;
+  const maxBeamSizeRef = useRef(maxBeamSize);
+  maxBeamSizeRef.current = maxBeamSize;
+
+  // Fetch the server-side limits once; on failure keep the defaults (beam
+  // search hidden), matching a server that doesn't expose the endpoint.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await fetch("/config");
+        if (!resp.ok) return;
+        const data = (await resp.json()) as { max_beam_size?: number };
+        const max = data.max_beam_size;
+        if (!cancelled && typeof max === "number" && Number.isInteger(max) && max >= 1)
+          setMaxBeamSize(max);
+      } catch {
+        /* ignore — server may not expose endpoint */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   // Read inside the per-frame loop (which only re-subscribes on `audio`) so the
   // transcribed-so-far tint is only drawn while a transcription is running.
   const appStateRef = useRef(appState);
@@ -95,6 +136,25 @@ export function App() {
     getTempoBpm: () => {
       const v = Number.parseFloat(tempoRef.current);
       return Number.isFinite(v) && v >= 10 && v <= 999 ? v : null;
+    },
+    getUseSampling: () => useSamplingRef.current,
+    // Out-of-range values fall back to the server defaults (1.0), matching
+    // the fields' initial values.
+    getTemperature: () => {
+      const v = Number.parseFloat(temperatureRef.current);
+      return Number.isFinite(v) && v > 0 && v <= 10 ? v : null;
+    },
+    getCfgCoef: () => {
+      const v = Number.parseFloat(cfgCoefRef.current);
+      return Number.isFinite(v) && v >= 0 && v <= 10 ? v : null;
+    },
+    // null when beam search is unavailable (cap of 1) or the field doesn't
+    // hold a usable width — the server then uses its default of 1.
+    getBeamSize: () => {
+      const max = maxBeamSizeRef.current;
+      if (max <= 1) return null;
+      const v = Number.parseInt(beamSizeRef.current, 10);
+      return Number.isInteger(v) && v >= 1 && v <= max ? v : null;
     },
     progress,
     // A failed transcription bounces back to the welcome screen with a message.
@@ -346,6 +406,15 @@ export function App() {
           onCondStrictChange={setCondStrict}
           tempoBpm={tempoBpm}
           onTempoBpmChange={setTempoBpm}
+          useSampling={useSampling}
+          onUseSamplingChange={setUseSampling}
+          temperature={temperature}
+          onTemperatureChange={setTemperature}
+          cfgCoef={cfgCoef}
+          onCfgCoefChange={setCfgCoef}
+          beamSize={beamSize}
+          onBeamSizeChange={setBeamSize}
+          maxBeamSize={maxBeamSize}
           onTranscribe={startTranscription}
           dragging={dragging}
           error={error}

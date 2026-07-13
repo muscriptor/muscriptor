@@ -65,7 +65,19 @@ def event_to_dict(ev: NoteStartEvent | NoteEndEvent) -> dict:
     }
 
 
-def create_app(model: TranscriptionModel, web_dir: str | Path | None = None) -> FastAPI:
+def create_app(
+    model: TranscriptionModel,
+    web_dir: str | Path | None = None,
+    max_beam_size: int = 1,
+) -> FastAPI:
+    """Build the FastAPI app.
+
+    ``max_beam_size`` caps the per-request ``beam_size``: beam search
+    multiplies the decoding cost, so a public deployment keeps this at 1
+    (requests asking for more are rejected) and the web UI hides the control.
+    """
+    if max_beam_size < 1:
+        raise ValueError(f"max_beam_size must be >= 1, got {max_beam_size}")
     app = FastAPI(title="muscriptor")
 
     transcribe_lock = threading.Lock()
@@ -87,6 +99,11 @@ def create_app(model: TranscriptionModel, web_dir: str | Path | None = None) -> 
     async def list_instruments():
         return {"instruments": list(MT3_FULL_PLUS_GROUP_NAMES.keys())}
 
+    @app.get("/config")
+    async def config():
+        """Server-side limits the web UI adapts to (e.g. hiding beam search)."""
+        return {"max_beam_size": max_beam_size}
+
     @app.get("/soundfonts/MuseScore_General.sf3")
     async def soundfont() -> FileResponse:
         """Compressed soundfont for the web UI's in-browser synthesizer.
@@ -103,6 +120,10 @@ def create_app(model: TranscriptionModel, web_dir: str | Path | None = None) -> 
         instruments: Annotated[list[str], Form(default_factory=list)],
         strict_instruments: Annotated[bool, Form()] = False,
         tempo_bpm: Annotated[float, Form()] = 120.0,
+        use_sampling: Annotated[bool, Form()] = False,
+        temperature: Annotated[float, Form()] = 1.0,
+        cfg_coef: Annotated[float, Form()] = 1.0,
+        beam_size: Annotated[int, Form()] = 1,
     ) -> StreamingResponse:
         data = await file.read()
         # PCM WAV goes through the stdlib reader (keeps WAV decoding byte-for-byte
@@ -137,6 +158,24 @@ def create_app(model: TranscriptionModel, web_dir: str | Path | None = None) -> 
             raise HTTPException(
                 status_code=400,
                 detail=f"tempo_bpm must be between 10 and 999, got {tempo_bpm}",
+            )
+        if not 0.0 < temperature <= 10.0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"temperature must be in (0, 10], got {temperature}",
+            )
+        if not 0.0 <= cfg_coef <= 10.0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"cfg_coef must be between 0 and 10, got {cfg_coef}",
+            )
+        if not 1 <= beam_size <= max_beam_size:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"beam_size must be between 1 and {max_beam_size}, "
+                    f"got {beam_size}"
+                ),
             )
 
         # Preempt whoever holds the lock, then wait for it. The short acquire
@@ -180,6 +219,10 @@ def create_app(model: TranscriptionModel, web_dir: str | Path | None = None) -> 
                 # warns (and keeps its notes) instead of aborting the whole stream.
                 for ev in model.transcribe(
                     (wav, sr),
+                    use_sampling=use_sampling,
+                    temperature=temperature,
+                    cfg_coef=cfg_coef,
+                    beam_size=beam_size,
                     instruments=instruments or None,
                     strict_instruments=strict_instruments,
                     batch_size=1,

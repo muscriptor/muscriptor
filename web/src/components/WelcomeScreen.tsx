@@ -11,6 +11,11 @@ import type { AppError } from "../App";
 
 const SERVER_DOWN = "The muscriptor server is temporarily unavailable.";
 
+const NUMBER_INPUT_CLS =
+  "rounded-lg border border-line-strong bg-bg px-2.5 py-2 text-sm text-content " +
+  "outline-none transition-colors duration-150 ease-fluid focus:border-accent " +
+  "disabled:cursor-not-allowed disabled:opacity-40";
+
 /**
  * First screen of the two-step flow: pick an audio file, then optionally choose
  * conditioning instruments, then hit "Transcribe" to hand off to the main view.
@@ -28,6 +33,20 @@ export function WelcomeScreen(props: {
   /** Raw text of the MIDI-tempo field (parsed/validated at submit time). */
   tempoBpm: string;
   onTempoBpmChange: (next: string) => void;
+  /** Decode with temperature sampling instead of greedy. */
+  useSampling: boolean;
+  onUseSamplingChange: (next: boolean) => void;
+  /** Raw text of the temperature field (only used with sampling). */
+  temperature: string;
+  onTemperatureChange: (next: string) => void;
+  /** Raw text of the classifier-free-guidance field. */
+  cfgCoef: string;
+  onCfgCoefChange: (next: string) => void;
+  /** Raw text of the beam-width field. */
+  beamSize: string;
+  onBeamSizeChange: (next: string) => void;
+  /** Server-side beam width cap; 1 hides the beam-size control entirely. */
+  maxBeamSize: number;
   onTranscribe: () => void;
   /** True while a file is dragged over the window; swaps the prompt in place. */
   dragging: boolean;
@@ -45,6 +64,15 @@ export function WelcomeScreen(props: {
     onCondStrictChange,
     tempoBpm,
     onTempoBpmChange,
+    useSampling,
+    onUseSamplingChange,
+    temperature,
+    onTemperatureChange,
+    cfgCoef,
+    onCfgCoefChange,
+    beamSize,
+    onBeamSizeChange,
+    maxBeamSize,
     onTranscribe,
     dragging,
     error,
@@ -186,26 +214,104 @@ export function WelcomeScreen(props: {
             onStrictChange={onCondStrictChange}
           />
           <div className="flex flex-wrap items-center justify-between gap-4">
-            <label
-              className="flex items-center gap-2 text-sm text-muted"
-              title={
-                "Tempo stamped into the downloaded MIDI file. Timing stays " +
-                "wall-clock accurate at any value — set your track's real BPM " +
-                "so beats land on your DAW's grid."
-              }
-            >
-              MIDI tempo
-              <input
-                type="number"
-                className="w-24 rounded-lg border border-line-strong bg-bg px-2.5 py-2 text-sm text-content outline-none transition-colors duration-150 ease-fluid focus:border-accent"
-                min={10}
-                max={999}
-                step={0.1}
-                value={tempoBpm}
-                onChange={(e) => onTempoBpmChange(e.target.value)}
-              />
-              BPM
-            </label>
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
+              <label
+                className="flex items-center gap-2 text-sm text-muted"
+                title={
+                  "Tempo stamped into the downloaded MIDI file. Timing stays " +
+                  "wall-clock accurate at any value — set your track's real BPM " +
+                  "so beats land on your DAW's grid."
+                }
+              >
+                MIDI tempo
+                <input
+                  type="number"
+                  className={clsx("w-24", NUMBER_INPUT_CLS)}
+                  min={10}
+                  max={999}
+                  step={0.1}
+                  value={tempoBpm}
+                  onChange={(e) => onTempoBpmChange(e.target.value)}
+                />
+                BPM
+              </label>
+              <label
+                className="flex cursor-pointer select-none items-center gap-2 text-sm text-muted"
+                title={
+                  "Use temperature sampling instead of greedy decoding. Adds " +
+                  "randomness — each run can give a different transcription."
+                }
+              >
+                <input
+                  type="checkbox"
+                  className="accent-current"
+                  checked={useSampling}
+                  onChange={(e) => onUseSamplingChange(e.target.checked)}
+                />
+                Sampling
+              </label>
+              <label
+                className={clsx(
+                  "flex items-center gap-2 text-sm",
+                  useSampling ? "text-muted" : "cursor-not-allowed text-faint",
+                )}
+                title={
+                  "Sampling temperature. Higher values make the decoding more " +
+                  "random; only used when sampling is enabled."
+                }
+              >
+                Temperature
+                <input
+                  type="number"
+                  className={clsx("w-20", NUMBER_INPUT_CLS)}
+                  min={0.1}
+                  max={10}
+                  step={0.1}
+                  value={temperature}
+                  disabled={!useSampling}
+                  onChange={(e) => onTemperatureChange(e.target.value)}
+                />
+              </label>
+              <label
+                className="flex items-center gap-2 text-sm text-muted"
+                title={
+                  "Classifier-free guidance coefficient. 1 disables guidance; " +
+                  "higher values follow the instrument conditioning more strongly."
+                }
+              >
+                Guidance
+                <input
+                  type="number"
+                  className={clsx("w-20", NUMBER_INPUT_CLS)}
+                  min={0}
+                  max={10}
+                  step={0.1}
+                  value={cfgCoef}
+                  onChange={(e) => onCfgCoefChange(e.target.value)}
+                />
+              </label>
+              {maxBeamSize > 1 && (
+                <label
+                  className="flex items-center gap-2 text-sm text-muted"
+                  title={
+                    "Beam search width. 1 = greedy/sampling; higher values " +
+                    "explore several decodings and keep the best, at a " +
+                    `proportional cost in time (server cap: ${maxBeamSize}).`
+                  }
+                >
+                  Beam size
+                  <input
+                    type="number"
+                    className={clsx("w-20", NUMBER_INPUT_CLS)}
+                    min={1}
+                    max={maxBeamSize}
+                    step={1}
+                    value={beamSize}
+                    onChange={(e) => onBeamSizeChange(e.target.value)}
+                  />
+                </label>
+              )}
+            </div>
             <button
               className="btn-primary rounded-xl px-9 py-3 text-base"
               onClick={onTranscribe}

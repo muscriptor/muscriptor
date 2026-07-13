@@ -12,6 +12,7 @@ export default defineConfig({
       [
         "/transcribe",
         "/instruments",
+        "/config",
         "/auralize",
         "/health",
         "/soundfonts",

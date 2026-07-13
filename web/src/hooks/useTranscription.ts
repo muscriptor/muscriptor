@@ -39,6 +39,14 @@ export interface TranscriptionDeps {
   getStrict: () => boolean;
   /** Tempo stamped into the MIDI file, or null to use the server default. */
   getTempoBpm: () => number | null;
+  /** Whether to decode with temperature sampling instead of greedy. */
+  getUseSampling: () => boolean;
+  /** Sampling temperature, or null to use the server default. */
+  getTemperature: () => number | null;
+  /** Classifier-free guidance coefficient, or null to use the server default. */
+  getCfgCoef: () => number | null;
+  /** Beam search width, or null when unavailable / using the server default. */
+  getBeamSize: () => number | null;
   /** Smooths chunk-completion anchors into a live progress fraction + ETA. */
   progress: ProgressEstimator;
   /** Called when a (non-superseded) transcription fails, so the UI can recover.
@@ -71,6 +79,10 @@ export function useTranscription(deps: TranscriptionDeps) {
     getConditioning,
     getStrict,
     getTempoBpm,
+    getUseSampling,
+    getTemperature,
+    getCfgCoef,
+    getBeamSize,
     progress,
     onError,
     setAppState,
@@ -190,6 +202,16 @@ export function useTranscription(deps: TranscriptionDeps) {
       }
       const tempo = getTempoBpm();
       if (tempo !== null) extra.tempo_bpm = String(tempo);
+      if (getUseSampling()) {
+        extra.use_sampling = "true";
+        // temperature only applies when sampling (matches the CLI's --sampling).
+        const temp = getTemperature();
+        if (temp !== null) extra.temperature = String(temp);
+      }
+      const cfg = getCfgCoef();
+      if (cfg !== null) extra.cfg_coef = String(cfg);
+      const beam = getBeamSize();
+      if (beam !== null) extra.beam_size = String(beam);
       for await (const raw of streamTranscribe(
         "/transcribe",
         file,
