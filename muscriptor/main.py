@@ -159,23 +159,13 @@ def transcribe(
             "--instruments",
             help=(
                 "Comma-separated list of expected instrument group names. "
-                "Case-insensitive; unambiguous abbreviations are accepted "
-                "(e.g. 'timp,cello,dist'). Run 'muscriptor list-instruments' "
-                "to see all available names."
+                "When given, every instrument not in the list is forbidden "
+                "from being decoded at all. Case-insensitive; unambiguous "
+                "abbreviations are accepted (e.g. 'timp,cello,dist'). Run "
+                "'muscriptor list-instruments' to see all available names."
             ),
         ),
     ] = None,
-    strict_instruments: Annotated[
-        bool,
-        typer.Option(
-            "--strict-instruments",
-            help=(
-                "Forbid instruments not listed in --instruments from being "
-                "decoded at all, instead of only conditioning the model on "
-                "the list (requires --instruments)."
-            ),
-        ),
-    ] = False,
 ) -> None:
     """Transcribe an audio file to MIDI."""
     instrument_names: list[str] | None = None
@@ -191,12 +181,6 @@ def transcribe(
             )
             raise typer.Exit(1)
         typer.echo(f"Instruments: {', '.join(instrument_names)}", err=True)
-
-    if strict_instruments and not instrument_names:
-        typer.echo(
-            "Error: --strict-instruments requires --instruments", err=True
-        )
-        raise typer.Exit(1)
 
     if not audio_file.exists():
         typer.echo(f"Error: file not found: {audio_file}", err=True)
@@ -234,7 +218,6 @@ def transcribe(
         temperature=temperature,
         cfg_coef=cfg_coef,
         instruments=instrument_names,
-        strict_instruments=strict_instruments,
         batch_size=batch_size,
         no_eos_is_ok=not strict_eos,
         beam_size=beam_size,

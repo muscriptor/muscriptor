@@ -23,8 +23,6 @@ export function WelcomeScreen(props: {
   onUseExample: () => Promise<void>;
   condSelected: Set<string>;
   onCondChange: (next: Set<string>) => void;
-  condStrict: boolean;
-  onCondStrictChange: (next: boolean) => void;
   onTranscribe: () => void;
   /** True while a file is dragged over the window; swaps the prompt in place. */
   dragging: boolean;
@@ -38,8 +36,6 @@ export function WelcomeScreen(props: {
     onUseExample,
     condSelected,
     onCondChange,
-    condStrict,
-    onCondStrictChange,
     onTranscribe,
     dragging,
     error,
@@ -174,12 +170,7 @@ export function WelcomeScreen(props: {
 
       {error?.kind !== "server" && selectedFile !== null && (
         <>
-          <ConditioningPanel
-            selected={condSelected}
-            onChange={onCondChange}
-            strict={condStrict}
-            onStrictChange={onCondStrictChange}
-          />
+          <ConditioningPanel selected={condSelected} onChange={onCondChange} />
           <div className="flex justify-end">
             <button
               className="btn-primary rounded-xl px-9 py-3 text-base"

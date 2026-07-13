@@ -308,7 +308,6 @@ class TranscriptionModel:
         temperature: float = 1.0,
         cfg_coef: float = 1.0,
         instruments: list[str] | None = None,
-        strict_instruments: bool = False,
         batch_size: int | None = None,
         no_eos_is_ok: bool = True,
         beam_size: int = 1,
@@ -320,11 +319,10 @@ class TranscriptionModel:
         within each chunk events arrive in temporal order, and all events
         from chunk N are yielded before any event from chunk N+1.
 
-        ``instruments`` conditions the model on the expected instrument groups
-        (advisory: the model can still decode others). With
-        ``strict_instruments=True`` the listed instruments also become a hard
-        constraint — every program/drum token outside the list is masked out
-        during generation, so no other instrument can appear in the output.
+        ``instruments``, when given, is a hard constraint: every program/drum
+        token outside the listed groups is masked out during generation, so
+        no other instrument can appear in the output. Leave it unset to let
+        the model decode whatever instruments it detects.
 
         Interleaved with the note events are coarse :class:`ProgressEvent`
         anchors (``completed`` of ``total`` chunks): one up front with
@@ -334,18 +332,13 @@ class TranscriptionModel:
         if batch_size is None:
             batch_size = 4 if self._device.type == "cuda" else 1
 
-        if strict_instruments and not instruments:
-            raise ValueError(
-                "strict_instruments=True requires a non-empty `instruments` list"
-            )
-
         # Exact names only here — the CLI resolves abbreviations before
         # calling in (resolve_instrument_names).
         instrument_group = (
             instrument_group_from_names(instruments) if instruments else None
         )
         forbidden_tokens = None
-        if strict_instruments:
+        if instruments:
             forbidden_tokens = torch.tensor(
                 self._tokenizer.forbidden_token_ids(instruments),
                 device=self._device,
@@ -529,7 +522,6 @@ class TranscriptionModel:
         temperature: float = 1.0,
         cfg_coef: float = 1.0,
         instruments: list[str] | None = None,
-        strict_instruments: bool = False,
         batch_size: int | None = None,
         no_eos_is_ok: bool = True,
         beam_size: int = 1,
@@ -541,7 +533,6 @@ class TranscriptionModel:
             temperature=temperature,
             cfg_coef=cfg_coef,
             instruments=instruments,
-            strict_instruments=strict_instruments,
             batch_size=batch_size,
             no_eos_is_ok=no_eos_is_ok,
             beam_size=beam_size,

@@ -2,7 +2,8 @@
 
 Covers the tokenizer's forbidden-token computation, the LMModel logit masking
 across the greedy / sampling / beam decode paths (with a tiny random model, no
-weights), and TranscriptionModel argument validation.
+weights), and that TranscriptionModel.transcribe activates the constraint
+automatically whenever `instruments` is given — there is no separate flag.
 """
 
 from types import SimpleNamespace
@@ -147,14 +148,42 @@ def test_generate_unmasked_uses_full_vocabulary(tiny_model):
 
 
 # ---------------------------------------------------------------------------
-# TranscriptionModel argument validation
+# TranscriptionModel.transcribe: automatic activation
+#
+# There is no user-facing flag — giving `instruments` always forbids every
+# other instrument; omitting it never forbids anything.
 # ---------------------------------------------------------------------------
 
 
-def test_transcribe_strict_requires_instruments():
-    fake = SimpleNamespace(_device=torch.device("cpu"))
-    stream = TranscriptionModel.transcribe(
-        fake, "unused.wav", strict_instruments=True
-    )
-    with pytest.raises(ValueError, match="strict_instruments"):
-        next(stream)
+def _forbidden_tokens_used_by_transcribe(instruments, tokenizer):
+    """Run transcribe() with the audio/model internals faked out, and report
+    the `forbidden_tokens` it hands to `_generate_token_stream`."""
+    captured = {}
+
+    class _Fake:
+        _device = torch.device("cpu")
+        _tokenizer = tokenizer
+        _instrument_for_program = staticmethod(lambda program: "x")
+
+        def _load_wav(self, audio, sample_rate):
+            return torch.zeros(1, 16000)
+
+        def _build_conditions(self, wav, instrument_group=None):
+            return [SimpleNamespace()]
+
+        def _generate_token_stream(self, *args):
+            captured["forbidden_tokens"] = args[-1]
+            return iter([])
+
+    list(TranscriptionModel.transcribe(_Fake(), "unused.wav", instruments=instruments))
+    return captured["forbidden_tokens"]
+
+
+def test_instruments_given_activates_forbidden_tokens(tokenizer):
+    forbidden = _forbidden_tokens_used_by_transcribe(["violin"], tokenizer)
+    assert forbidden is not None
+    assert forbidden.tolist() == tokenizer.forbidden_token_ids(["violin"])
+
+
+def test_no_instruments_means_no_forbidden_tokens(tokenizer):
+    assert _forbidden_tokens_used_by_transcribe(None, tokenizer) is None

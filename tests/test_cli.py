@@ -151,18 +151,7 @@ def test_jsonl_to_file_keeps_progress_on_stderr(patched_model, fake_audio, tmp_p
     ]
 
 
-def test_strict_instruments_requires_instruments(patched_model, fake_audio):
-    runner = CliRunner()
-    result = runner.invoke(
-        main_mod.app,
-        ["transcribe", str(fake_audio), "--strict-instruments", "-f", "jsonl", "-o", "-"],
-    )
-    assert result.exit_code == 1
-    assert "--strict-instruments requires --instruments" in result.stderr
-    assert _FakeModel.last_kwargs is None
-
-
-def test_strict_instruments_passed_to_model(patched_model, fake_audio):
+def test_instruments_passed_to_model(patched_model, fake_audio):
     runner = CliRunner()
     result = runner.invoke(
         main_mod.app,
@@ -171,7 +160,6 @@ def test_strict_instruments_passed_to_model(patched_model, fake_audio):
             str(fake_audio),
             "--instruments",
             "violin,drums",
-            "--strict-instruments",
             "-f",
             "jsonl",
             "-o",
@@ -180,4 +168,3 @@ def test_strict_instruments_passed_to_model(patched_model, fake_audio):
     )
     assert result.exit_code == 0, result.stderr
     assert _FakeModel.last_kwargs["instruments"] == ["violin", "drums"]
-    assert _FakeModel.last_kwargs["strict_instruments"] is True

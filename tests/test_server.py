@@ -220,41 +220,13 @@ def test_transcribe_rejects_undecodable_file():
     assert resp.status_code == 400
 
 
-def test_transcribe_strict_without_instruments_is_rejected(tmp_path):
-    """strict_instruments with an empty instrument list is a client error."""
+def test_transcribe_passes_instruments(tmp_path):
     model = make_model()
     client = TestClient(create_app(model))
     resp = client.post(
         "/transcribe",
         files={"file": ("silent.wav", _wav_bytes(tmp_path), "audio/wav")},
-        data={"strict_instruments": "true"},
-    )
-    assert resp.status_code == 400
-    assert "strict_instruments" in resp.json()["detail"]
-    model.transcribe.assert_not_called()
-
-
-def test_transcribe_passes_strict_instruments(tmp_path):
-    model = make_model()
-    client = TestClient(create_app(model))
-    resp = client.post(
-        "/transcribe",
-        files={"file": ("silent.wav", _wav_bytes(tmp_path), "audio/wav")},
-        data={"instruments": ["violin", "drums"], "strict_instruments": "true"},
+        data={"instruments": ["violin", "drums"]},
     )
     assert resp.status_code == 200
-    kwargs = model.transcribe.call_args.kwargs
-    assert kwargs["instruments"] == ["violin", "drums"]
-    assert kwargs["strict_instruments"] is True
-
-
-def test_transcribe_strict_defaults_to_false(tmp_path):
-    model = make_model()
-    client = TestClient(create_app(model))
-    resp = client.post(
-        "/transcribe",
-        files={"file": ("silent.wav", _wav_bytes(tmp_path), "audio/wav")},
-        data={"instruments": ["violin"]},
-    )
-    assert resp.status_code == 200
-    assert model.transcribe.call_args.kwargs["strict_instruments"] is False
+    assert model.transcribe.call_args.kwargs["instruments"] == ["violin", "drums"]
