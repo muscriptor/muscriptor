@@ -22,12 +22,9 @@ import { ProgressEstimator, formatClock } from "./progress";
 
 type Screen = "welcome" | "transcribe";
 
-// Bundled demo track (web/public/example.mp3) plus a sensible conditioning
-// guess — it's a rock recording, so guitars, bass, drums, and vocals.
+// The song is Headache by Lost Deposit. ig: @lostdeposit
 const EXAMPLE = {
-  // The short clip (1:12, fading out from 1:02) keeps the demo quick; the full
-  // track lives at /example.mp3 if a longer run is ever wanted.
-  url: "/example_1min.mp3",
+  url: "/headache_by_lost_deposit_1min.mp3",
   filename: "Lost Deposit - Headache (example track)",
   conditioning: [
     "drums",
