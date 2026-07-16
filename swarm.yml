@@ -43,7 +43,7 @@ services:
           - node.role == manager
 
   backend:
-    image: rg.fr-par.scw.cloud/namespace-unruffled-tereshkova/muscriptor.kyutai.org-backend:latest
+    image: rg.fr-par.scw.cloud/tf-muscriptor-images/muscriptor.kyutai.org-backend:latest
     build:
       context: ./
     command: ["--port", "80"]
