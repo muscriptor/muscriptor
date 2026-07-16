@@ -16,10 +16,10 @@ jobs:
       run: |
         mkdir -p ~/.ssh
         chmod 700 ~/.ssh
-        # docker -H ssh://... uses the system ssh client, which picks up this default key.
+        # The public key is at .github/workflows/id_ed25519.pub
+        # If the machine changes, add this key to the authorized_keys of the new machine.
         echo "${{ secrets.DEPLOYMENT_SSH_KEY }}" > ~/.ssh/id_ed25519
         chmod 600 ~/.ssh/id_ed25519
-        # Trust the host key so the ssh connection isn't blocked by the prompt.
         ssh-keyscan muscriptor.kyutai.org >> ~/.ssh/known_hosts
     - name: Deploy
       env:
