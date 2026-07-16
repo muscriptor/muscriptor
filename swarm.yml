@@ -46,6 +46,10 @@ services:
     image: rg.fr-par.scw.cloud/tf-muscriptor-images/muscriptor.kyutai.org-backend:latest
     build:
       context: ./
+      args:
+        # Enables Google Analytics in the web UI for this deployment only —
+        # builds without the ID (local dev, PyPI) contain no analytics at all.
+        VITE_GA_MEASUREMENT_ID: G-FNB2XC72R7
     command: ["--port", "80"]
     environment:
       - HF_TOKEN=${HF_TOKEN:?HF_TOKEN must be set to pull the private weights}

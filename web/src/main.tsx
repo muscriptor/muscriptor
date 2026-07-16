@@ -1,6 +1,9 @@
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { initAnalytics } from "./analytics";
 import "./style.css";
+
+initAnalytics();
 
 // No <StrictMode>: the app is built around Tone's single global transport /
 // AudioContext (see useAudioEngine), and StrictMode's simulated double-mount

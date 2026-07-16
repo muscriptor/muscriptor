@@ -1,5 +1,6 @@
 import { useRef, type Dispatch, type RefObject, type SetStateAction } from "react";
 import { streamTranscribe, TranscribeError } from "../sse";
+import { track } from "../analytics";
 import type { AudioEngine } from "../audio";
 import type { ProgressEstimator } from "../progress";
 import { PianoRoll, type RollNote } from "../pianoroll";
@@ -173,7 +174,9 @@ export function useTranscription(deps: TranscriptionDeps) {
     // Decode the WAV in parallel with the transcription so it's ready by the
     // time the user hits play.
     audio.loadWav(file).catch(() => {});
+    const startedAt = performance.now();
     let maxEnd = 0;
+    let noteCount = 0;
     try {
       const cond = getConditioning();
       const extra = cond.length > 0 ? { instruments: cond } : undefined;
@@ -198,17 +201,33 @@ export function useTranscription(deps: TranscriptionDeps) {
           continue;
         }
         onEvent(ev);
+        if (ev.type === "start") noteCount++;
         if (ev.type === "end" && ev.end_time > maxEnd) maxEnd = ev.end_time;
       }
       if (isStale()) return;
       // Stop the transport ~0.3 s after the last note ends.
       if (maxEnd > 0) audio.scheduleStop(maxEnd + 0.3);
       setAppState("done");
+      track("transcription_complete", {
+        // Decoded length of the uploaded audio; 0 if decoding hasn't finished
+        // (or failed) by the time the transcription stream ends.
+        audio_duration_s: Math.round(audio.duration),
+        transcribe_time_s: Math.round((performance.now() - startedAt) / 1000),
+        instruments: cond.slice().sort().join(",") || "(none)",
+        instrument_count: cond.length,
+        detected_instruments: Array.from(knownRef.current).sort().join(","),
+        detected_count: knownRef.current.size,
+        note_count: noteCount,
+      });
     } catch (e) {
       // An abort (from being superseded) surfaces here as an error — ignore it
       // so it can't clobber the newer run.
       if (isStale() || controller.signal.aborted) return;
       setAppState("error");
+      track("transcription_error", {
+        status: e instanceof TranscribeError ? e.status : undefined,
+        message: e instanceof Error ? e.message : String(e),
+      });
       // Prefer the server's explanation (e.g. an undecodable file) over a
       // generic message; fall back when the failure was a network error or
       // the server gave no detail.

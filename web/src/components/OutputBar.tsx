@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import clsx from "clsx";
 import { Button } from "./Button";
 import { IconChevron, IconDownload } from "./icons";
+import { track } from "../analytics";
 
 /**
  * Output / "job" actions, shown below the piano roll: live transcription
@@ -58,6 +59,7 @@ export function OutputBar(props: {
 
   function download() {
     if (midiUrl === null) return;
+    track("download", { format: "midi" });
     const a = document.createElement("a");
     a.href = midiUrl;
     a.download = midiFilename;
@@ -69,6 +71,7 @@ export function OutputBar(props: {
   // (L = original, R = synthesis) for easy A/B comparison.
   async function downloadWav(mode: "synth" | "mix") {
     if (midiBlob === null || currentFile === null) return;
+    track("download", { format: mode === "mix" ? "wav_mix" : "wav_synth" });
     setSynthesizing(true);
     try {
       const form = new FormData();
