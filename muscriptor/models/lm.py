@@ -195,6 +195,7 @@ class LMModel(nn.Module):
         model_state: ModelState,
         first_step: bool,
         cfg_coef: float | None = None,
+        forbidden_tokens: torch.Tensor | None = None,
     ) -> torch.Tensor:  # [B, card]
         """Run the forward pass and return masked logits at the last timestep."""
         B = sequence.shape[0]
@@ -220,6 +221,8 @@ class LMModel(nn.Module):
 
         logits = logits[:, -1, :].float()  # [B, card] — last timestep
         logits[:, 1393:] = -torch.inf      # mask reserved / OOV tokens
+        if forbidden_tokens is not None:
+            logits[:, forbidden_tokens] = -torch.inf
         return logits
 
     def _sample_next_token(
@@ -233,9 +236,11 @@ class LMModel(nn.Module):
         top_k: int = 0,
         top_p: float = 0.0,
         cfg_coef: float | None = None,
+        forbidden_tokens: torch.Tensor | None = None,
     ) -> torch.Tensor:  # [B]
         logits = self._compute_logits(
-            sequence, cfg_conditions, model_state, first_step, cfg_coef
+            sequence, cfg_conditions, model_state, first_step, cfg_coef,
+            forbidden_tokens=forbidden_tokens,
         )
         if use_sampling and temp > 0.0:
             probs = torch.softmax(logits / temp, dim=-1)
@@ -263,17 +268,28 @@ class LMModel(nn.Module):
         early_stop_on_token: int | None = None,
         beam_size: int = 1,
         beam_length_score_alpha: float = 0.75,
+        forbidden_tokens: torch.Tensor | list[int] | None = None,
     ) -> Iterator[torch.Tensor]:
         """Autoregressively generate tokens, yielding one timestep at a time.
 
         Each yield is a ``[num_samples]`` tensor. For beam_size == 1 (default),
         tokens are yielded as they are generated. For beam_size > 1, beam search
         is run non-streamingly and all tokens are yielded at the end.
+
+        ``forbidden_tokens`` are token ids whose logits are forced to -inf at
+        every step, so they can never be sampled (greedy, sampling or beam).
         """
         assert not self.training
         if beam_size > 1:
             assert early_stop_on_token is not None, "beam search requires early_stop_on_token"
         device = self.emb.weight.device
+
+        if forbidden_tokens is not None and not isinstance(
+            forbidden_tokens, torch.Tensor
+        ):
+            forbidden_tokens = torch.tensor(
+                forbidden_tokens, device=device, dtype=torch.long
+            )
 
         if num_samples is None:
             num_samples = (
@@ -395,6 +411,7 @@ class LMModel(nn.Module):
                         top_k=top_k,
                         top_p=top_p,
                         cfg_coef=cfg_coef,
+                        forbidden_tokens=forbidden_tokens,
                     )  # [B]
 
                     input_T = input_.shape[-1]
@@ -417,6 +434,7 @@ class LMModel(nn.Module):
                     logits = self._compute_logits(
                         input_, cfg_conditions, model_state,
                         first_step=first_iter, cfg_coef=cfg_coef,
+                        forbidden_tokens=forbidden_tokens,
                     )  # [eff_batch, card]
                     input_T = input_.shape[-1]
                     increment_steps(

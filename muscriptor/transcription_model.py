@@ -319,6 +319,11 @@ class TranscriptionModel:
         within each chunk events arrive in temporal order, and all events
         from chunk N are yielded before any event from chunk N+1.
 
+        ``instruments``, when given, is a hard constraint: every program/drum
+        token outside the listed groups is masked out during generation, so
+        no other instrument can appear in the output. Leave it unset to let
+        the model decode whatever instruments it detects.
+
         Interleaved with the note events are coarse :class:`ProgressEvent`
         anchors (``completed`` of ``total`` chunks): one up front with
         ``completed == 0``, then one as each chunk finishes. Consumers that
@@ -332,6 +337,13 @@ class TranscriptionModel:
         instrument_group = (
             instrument_group_from_names(instruments) if instruments else None
         )
+        forbidden_tokens = None
+        if instruments:
+            forbidden_tokens = torch.tensor(
+                self._tokenizer.forbidden_token_ids(instruments),
+                device=self._device,
+                dtype=torch.long,
+            )
 
         timings: list[tuple[str, float]] = []
         t_total = time.perf_counter()
@@ -385,6 +397,7 @@ class TranscriptionModel:
                 cfg_coef,
                 no_eos_is_ok,
                 beam_size,
+                forbidden_tokens,
             ),
             self._tokenizer._vocab,
             self._instrument_for_program,
@@ -415,6 +428,7 @@ class TranscriptionModel:
         cfg_coef: float,
         no_eos_is_ok: bool,
         beam_size: int = 1,
+        forbidden_tokens: torch.Tensor | None = None,
     ) -> Iterator[int | ChunkBoundary | ProgressEvent]:
         """Generate tokens and yield them per chunk, as soon as they are ready.
 
@@ -454,6 +468,7 @@ class TranscriptionModel:
                 cfg_coef=cfg_coef,
                 early_stop_on_token=eos_id,
                 beam_size=beam_size,
+                forbidden_tokens=forbidden_tokens,
             ):
                 row = step.tolist()  # one token per chunk: [n]
                 for j in range(n):

@@ -110,7 +110,10 @@ export function ConditioningPanel(props: {
           <h2 className="m-0 text-lg font-bold text-white">
             What instruments are there in this track?
           </h2>
-          <p className="text-faint">Optional. Fill in for a more accurate transcription.</p>
+          <p className="text-faint">
+            Optional. Leave empty to let the model detect anything; listing
+            instruments here forbids every other instrument from appearing.
+          </p>
         </div>
         <div className="ml-auto">
           <Button

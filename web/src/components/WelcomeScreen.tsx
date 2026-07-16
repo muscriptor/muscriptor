@@ -86,9 +86,11 @@ export function WelcomeScreen(props: {
         it transcribes the notes played by every instrument into
         MIDI, for you to download or explore interactively.
       </p>
+      {/* Explicit extensions alongside the wildcard, needed for iOS Safari
+       * which sometimes grays out perfectly valid audio files otherwise. */}
       <input
         type="file"
-        accept="audio/*"
+        accept="audio/*,.mp3,.m4a,.aac,.wav,.aiff,.aif,.flac,.ogg,.oga,.opus"
         hidden
         ref={fileInputRef}
         onChange={(e) => {

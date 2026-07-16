@@ -86,19 +86,28 @@ class StreamingMultiheadAttention(StatefulModule):
         k_t = k.transpose(1, 2)
         v_t = v.transpose(1, 2)
 
-        # Explicit bottom-right causal mask so streaming decode steps
-        # (T_q=1, T_k=cache_len) attend to all past tokens. PyTorch's
-        # is_causal=True uses top-left alignment and would mask out all
-        # cached tokens except position 0 when T_q < T_k.
+        # Causality must be bottom-right aligned so streaming decode steps
+        # (T_q=1, T_k=cache_len) attend to all past tokens; PyTorch's
+        # is_causal=True is top-left aligned and would mask out all cached
+        # tokens except position 0 when T_q < T_k. An explicit attn_mask
+        # forces SDPA onto the unfused math fallback, so only build one in
+        # the rectangular case that actually needs it — the two shapes this
+        # model hits (single-token decode and square prefill) stay mask-free
+        # and dispatch to the fused (flash) CPU/CUDA kernels.
         T_q, T_k = q_t.shape[2], k_t.shape[2]
-        mask = torch.ones(T_q, T_k, dtype=torch.bool, device=query.device).tril(
-            T_k - T_q
-        )
-        attn_bias = torch.zeros(T_q, T_k, dtype=q.dtype, device=query.device)
-        attn_bias.masked_fill_(~mask, float("-inf"))
-        x = F.scaled_dot_product_attention(
-            q_t, k_t, v_t, attn_mask=attn_bias, dropout_p=0.0
-        )
+        if T_q == 1:
+            # One query row, bottom-right aligned: nothing is masked.
+            x = F.scaled_dot_product_attention(q_t, k_t, v_t, dropout_p=0.0)
+        elif T_q == T_k:
+            # Square: bottom-right and top-left alignment coincide.
+            x = F.scaled_dot_product_attention(
+                q_t, k_t, v_t, is_causal=True, dropout_p=0.0
+            )
+        else:
+            # Unused in practice
+            raise NotImplementedError(
+                f"Streaming attention with T_q={T_q} and T_k={T_k} is not supported; use T_q=1 or T_q=T_k."
+            )
         x = x.transpose(1, 2).to(dtype)
 
         x = rearrange(x, "b t h d -> b t (h d)")

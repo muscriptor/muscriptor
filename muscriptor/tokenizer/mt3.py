@@ -229,3 +229,41 @@ class MT3Tokenizer:
         self.eos_id = SPECIAL_TOKENS.index("EOS")
 
         logger.info(f"MT3Tokenizer: {self.num_tokens} tokens")
+
+    def forbidden_token_ids(self, instruments: Iterable[str]) -> list[int]:
+        """Token ids that must never be sampled when only ``instruments`` may
+        appear in the transcription (the hard counterpart of the advisory
+        instrument_group conditioning).
+
+        ``instruments`` are exact MT3_FULL_PLUS group names (so this only makes
+        sense on a tokenizer built with that vocabulary). A ``program`` token is
+        forbidden unless it decodes to one of the given groups — i.e. it is the
+        representative (first) program of an allowed group; ``drum`` tokens are
+        forbidden unless "drums" is listed. Timing, pitch, velocity, tie and
+        special tokens are never forbidden. Raises ValueError on unknown names.
+        """
+        names = list(instruments)
+        unknown = [n for n in names if n not in MT3_FULL_PLUS_GROUP_NAMES]
+        if unknown:
+            raise ValueError(
+                f"unknown instrument name(s): {', '.join(map(repr, unknown))}; "
+                f"valid names: {', '.join(MT3_FULL_PLUS_GROUP_NAMES)}"
+            )
+        allow_drums = "drums" in names
+        # Same representative-program convention as decoding
+        # (transcription_model._build_instrument_for_program): the model emits
+        # the first program of a group, so only that program is allowed.
+        allowed_programs = set()
+        for name in names:
+            if name == "drums":
+                continue
+            gid = MT3_FULL_PLUS_GROUP_NAMES[name]
+            if gid in self.group_program_map and self.group_program_map[gid]:
+                allowed_programs.add(self.group_program_map[gid][0])
+        forbidden = []
+        for token_id, event in enumerate(self._vocab):
+            if event.type == "program" and event.value not in allowed_programs:
+                forbidden.append(token_id)
+            elif event.type == "drum" and not allow_drums:
+                forbidden.append(token_id)
+        return forbidden

@@ -159,9 +159,10 @@ def transcribe(
             "--instruments",
             help=(
                 "Comma-separated list of expected instrument group names. "
-                "Case-insensitive; unambiguous abbreviations are accepted "
-                "(e.g. 'timp,cello,dist'). Run 'muscriptor list-instruments' "
-                "to see all available names."
+                "When given, every instrument not in the list is forbidden "
+                "from being decoded at all. Case-insensitive; unambiguous "
+                "abbreviations are accepted (e.g. 'timp,cello,dist'). Run "
+                "'muscriptor list-instruments' to see all available names."
             ),
         ),
     ] = None,

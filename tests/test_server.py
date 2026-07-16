@@ -218,3 +218,15 @@ def test_transcribe_rejects_undecodable_file():
         files={"file": ("mystery.mp3", b"\x00\x01 not audio \x02\x03", "audio/mpeg")},
     )
     assert resp.status_code == 400
+
+
+def test_transcribe_passes_instruments(tmp_path):
+    model = make_model()
+    client = TestClient(create_app(model))
+    resp = client.post(
+        "/transcribe",
+        files={"file": ("silent.wav", _wav_bytes(tmp_path), "audio/wav")},
+        data={"instruments": ["violin", "drums"]},
+    )
+    assert resp.status_code == 200
+    assert model.transcribe.call_args.kwargs["instruments"] == ["violin", "drums"]
