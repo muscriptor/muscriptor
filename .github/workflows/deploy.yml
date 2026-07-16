@@ -1,0 +1,27 @@
+name: Deploy demo
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-demo
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up SSH access to the deployment host
+      run: |
+        mkdir -p ~/.ssh
+        chmod 700 ~/.ssh
+        # The public key is at .github/workflows/id_ed25519.pub
+        # If the machine changes, add this key to the authorized_keys of the new machine.
+        echo "${{ secrets.DEPLOYMENT_SSH_KEY }}" > ~/.ssh/id_ed25519
+        chmod 600 ~/.ssh/id_ed25519
+        ssh-keyscan muscriptor.kyutai.org >> ~/.ssh/known_hosts
+    - name: Deploy
+      env:
+        HF_TOKEN: ${{ secrets.DEPLOYMENT_HF_TOKEN }}
+      run: ./deploy.sh
