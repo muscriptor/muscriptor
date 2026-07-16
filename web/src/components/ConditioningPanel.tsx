@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
+import { Button } from "./Button";
 import { label, scoreInstrument } from "../instruments";
 
 /**
@@ -112,14 +113,15 @@ export function ConditioningPanel(props: {
           </p>
         </div>
         <div className="ml-auto">
-          <button
+          <Button
             type="button"
-            className="px-3.5 py-1 text-xs"
+            size="text-xs"
+            pad="px-3.5 py-1"
             onClick={() => onChange(new Set())}
             disabled={selected.size === 0}
           >
             Clear
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -134,9 +136,10 @@ export function ConditioningPanel(props: {
               key={name}
             >
               {label(name)}
-              <button
+              <Button
                 type="button"
-                className="grid size-4 place-content-center rounded border-none bg-transparent p-0 text-sm leading-none text-muted hover:border-none hover:bg-white/10 hover:text-content"
+                kind="ghost"
+                className="grid size-4 place-content-center rounded text-sm leading-none text-muted hover:bg-white/10 hover:text-content"
                 aria-label={`Remove ${label(name)}`}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -144,7 +147,7 @@ export function ConditioningPanel(props: {
                 }}
               >
                 ×
-              </button>
+              </Button>
             </span>
           ))}
           <input

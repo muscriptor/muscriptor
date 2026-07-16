@@ -17,6 +17,7 @@
   --color-accent-soft: rgba(255, 91, 122, 0.13);
   --color-accent-glow: rgba(255, 91, 122, 0.5);
   --color-ok: #4ad295;
+  --color-red: #ff5577; /* errors + the mute toggle; the playhead pink */
 
   --radius-card: 12px;
 
@@ -74,6 +75,16 @@
       box-shadow: 0 0 0 0 transparent;
     }
   }
+}
+
+/* Piano-roll canvas palette — pianoroll.ts reads these via getComputedStyle,
+   since canvas drawing can't use utility classes. */
+:root {
+  --roll-stripe: #16161c; /* C-row stripes, key separators, octave labels */
+  --roll-grid: #22222a;
+  --roll-playhead: #ff5577;
+  --roll-key-black: #23232b;
+  --roll-key-white: #cfd2dc;
 }
 
 /* ---- base -------------------------------------------------------------- */

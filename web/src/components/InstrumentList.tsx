@@ -1,6 +1,7 @@
 import { useEffect, useState, type RefObject } from "react";
 import clsx from "clsx";
 import type { AudioEngine } from "../audio";
+import { Button } from "./Button";
 import { instrumentColor, type PianoRoll } from "../pianoroll";
 import { label } from "../instruments";
 import { IconSound, IconSoundOff } from "./icons";
@@ -71,12 +72,13 @@ function InstrumentRow(props: {
         </span>
       </div>
       <div className="flex items-center gap-0.5">
-        <button
+        <Button
           type="button"
+          kind="ghost"
           className={clsx(
-            "-my-1 flex size-6 shrink-0 items-center justify-center rounded-md border-none bg-transparent p-0 text-xs font-semibold transition-[opacity,background,color] duration-150 ease-fluid hover:border-none hover:bg-white/[0.08]",
+            "-my-1 flex size-6 shrink-0 items-center justify-center rounded-md text-xs font-semibold transition-[opacity,background,color] duration-150 ease-fluid hover:bg-white/[0.08]",
             soloed
-              ? "text-[#ffcc44] opacity-100"
+              ? "text-accent-2 opacity-100"
               : "text-muted opacity-70 group-hover:opacity-100 hover:text-content",
           )}
           title={soloed ? "Unsolo" : "Solo (mute everything else)"}
@@ -84,13 +86,14 @@ function InstrumentRow(props: {
           onClick={onToggleSolo}
         >
           S
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
+          kind="ghost"
           className={clsx(
-            "-my-1 flex size-6 shrink-0 items-center justify-center rounded-md border-none bg-transparent p-0 transition-[opacity,background,color] duration-150 ease-fluid hover:border-none hover:bg-white/[0.08]",
+            "-my-1 flex size-6 shrink-0 items-center justify-center rounded-md transition-[opacity,background,color] duration-150 ease-fluid hover:bg-white/[0.08]",
             muted
-              ? "text-[#ff5577] opacity-100"
+              ? "text-red opacity-100"
               : "text-muted opacity-70 group-hover:opacity-100 hover:text-content",
           )}
           title={muted ? "Unmute on MIDI track" : "Mute on MIDI track"}
@@ -98,7 +101,7 @@ function InstrumentRow(props: {
           onClick={onToggleMute}
         >
           {muted ? <IconSoundOff /> : <IconSound />}
-        </button>
+        </Button>
       </div>
     </li>
   );

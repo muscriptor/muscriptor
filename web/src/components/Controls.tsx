@@ -1,6 +1,7 @@
 import { useEffect, useState, type RefObject } from "react";
 import clsx from "clsx";
 import type { AudioEngine } from "../audio";
+import { Button } from "./Button";
 import { IconPlay, IconPause } from "./icons";
 
 export function Controls(props: {
@@ -32,7 +33,7 @@ export function Controls(props: {
 
   return (
     <div className="col-span-full flex flex-wrap items-center gap-2.5 rounded-card border border-line bg-surface px-3.5 py-3 animate-rise [animation-delay:0.06s]">
-      <button
+      <Button
         className={clsx(
           "inline-flex items-center gap-2",
           playing && "border-accent bg-accent text-white hover:border-accent hover:bg-accent",
@@ -44,8 +45,8 @@ export function Controls(props: {
       >
         {playing ? <IconPause /> : <IconPlay />}
         {playing ? "Pause" : "Play"}
-      </button>
-      <button
+      </Button>
+      <Button
         className={clsx("text-content", following && "border-accent hover:border-accent")}
         aria-pressed={following}
         title={following ? "Stop following the playhead" : "Scroll along with the playhead"}
@@ -55,7 +56,7 @@ export function Controls(props: {
         }}
       >
         Follow playhead
-      </button>
+      </Button>
       <span
         className="rounded-md border border-line bg-bg px-2.5 py-1 font-mono text-sm tabular-nums text-muted"
         ref={clockRef}
