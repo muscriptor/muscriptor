@@ -16,10 +16,9 @@ jobs:
       run: |
         mkdir -p ~/.ssh
         chmod 700 ~/.ssh
-        echo "${{ secrets.DEPLOYMENT_SSH_KEY }}" > ~/.ssh/id_deploy
-        chmod 600 ~/.ssh/id_deploy
-        # docker -H ssh://... uses the system ssh client, which reads this config.
-        printf 'Host muscriptor.kyutai.org\n  IdentityFile ~/.ssh/id_deploy\n  IdentitiesOnly yes\n' > ~/.ssh/config
+        # docker -H ssh://... uses the system ssh client, which picks up this default key.
+        echo "${{ secrets.DEPLOYMENT_SSH_KEY }}" > ~/.ssh/id_ed25519
+        chmod 600 ~/.ssh/id_ed25519
         # Trust the host key so the ssh connection isn't blocked by the prompt.
         ssh-keyscan muscriptor.kyutai.org >> ~/.ssh/known_hosts
     - name: Deploy
