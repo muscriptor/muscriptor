@@ -167,7 +167,7 @@ export function InstrumentList(props: {
       {hasGiven ? (
         <>
           <h2 className="m-0 mb-3 flex items-center text-base font-semibold">
-            Given instruments
+            Instruments
             <HelpHint>
               The instruments you specified. Greyed-out ones weren't detected in
               the audio.
@@ -182,7 +182,8 @@ export function InstrumentList(props: {
               ),
             )}
           </ul>
-
+          {/* Now we don't allow non-specified instruments to appear, so probably dead code.
+            * Keeping for now in case we go back/make it configurable */}
           {extra.length > 0 && (
             <>
               <h2 className="m-0 mb-3 mt-5 text-base font-semibold">
