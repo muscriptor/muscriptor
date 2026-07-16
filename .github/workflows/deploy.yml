@@ -1,0 +1,30 @@
+name: Deploy demo
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-demo
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up SSH access to the deployment host
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.DEPLOYMENT_SSH_KEY }}" > ~/.ssh/id_deploy
+        chmod 600 ~/.ssh/id_deploy
+        eval "$(ssh-agent -s)"
+        ssh-add ~/.ssh/id_deploy
+        # docker -H ssh://... uses the system ssh client; keep the agent for later steps.
+        echo "SSH_AUTH_SOCK=$SSH_AUTH_SOCK" >> "$GITHUB_ENV"
+        echo "SSH_AGENT_PID=$SSH_AGENT_PID" >> "$GITHUB_ENV"
+        # Trust the host key so docker's ssh connection isn't blocked by the prompt.
+        ssh-keyscan muscriptor.kyutai.org >> ~/.ssh/known_hosts
+    - name: Deploy
+      env:
+        HF_TOKEN: ${{ secrets.DEPLOYMENT_HF_TOKEN }}
+      run: ./deploy.sh
