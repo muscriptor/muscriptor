@@ -10,6 +10,8 @@ import { InstrumentList } from "./components/InstrumentList";
 import { DropOverlay } from "./components/DropOverlay";
 import { Footer } from "./components/Footer";
 import { WelcomeScreen } from "./components/WelcomeScreen";
+import { ConsentBanner } from "./components/ConsentBanner";
+import { track } from "./analytics";
 
 /**
  * A failure surfaced on the welcome screen. `server` means the backend is
@@ -98,6 +100,13 @@ export function App() {
   // still happens under a user gesture.
   function startTranscription() {
     if (selectedFile === null) return;
+    track("transcription_start", {
+      instruments: Array.from(condSelected).sort().join(",") || "(none)",
+      instrument_count: condSelected.size,
+      is_example: selectedFile.name === EXAMPLE.filename,
+      file_type: (selectedFile.name.match(/\.([^./]+)$/)?.[1] ?? "unknown").toLowerCase(),
+      file_size_mb: Math.round(selectedFile.size / 1e5) / 10,
+    });
     // Drop any leftover file error from a previous failed attempt.
     setError(null);
     setScreen("transcribe");
@@ -376,6 +385,8 @@ export function App() {
       )}
 
       <Footer />
+
+      <ConsentBanner />
 
       {screen === "transcribe" && <DropOverlay />}
     </>

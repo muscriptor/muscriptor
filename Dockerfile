@@ -9,6 +9,10 @@ COPY web/package.json web/pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 
 COPY web/ ./
+# The GA4 measurement ID is inlined into the JS bundle by Vite; left unset
+# (the default), the frontend is built with analytics disabled entirely.
+ARG VITE_GA_MEASUREMENT_ID=
+ENV VITE_GA_MEASUREMENT_ID=$VITE_GA_MEASUREMENT_ID
 # vite outDir is ../muscriptor/web_dist, i.e. /muscriptor/web_dist in this stage.
 RUN pnpm run build
 
