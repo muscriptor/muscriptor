@@ -304,7 +304,7 @@ export function App() {
           title={screen === "transcribe" ? "Transcribe another file" : undefined}
         >
           <img
-            src="/muscriptor-logo-v4-pink.svg"
+            src="/muscriptor-logo-v4.svg"
             alt="MuScriptor logo"
             className="block h-[clamp(72px,10vw,110px)] w-auto"
             draggable={false}

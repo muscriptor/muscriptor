@@ -1,6 +1,7 @@
 import { useEffect, useState, type RefObject } from "react";
 import clsx from "clsx";
 import type { AudioEngine } from "../audio";
+import { Button } from "./Button";
 import { instrumentColor, type PianoRoll } from "../pianoroll";
 import { label } from "../instruments";
 import { IconSound, IconSoundOff } from "./icons";
@@ -18,7 +19,7 @@ function HelpHint(props: { children: string }) {
       </span>
       <span
         role="tooltip"
-        className="pointer-events-none absolute right-0 top-[calc(100%+8px)] z-30 w-60 rounded-lg border border-line-strong bg-surface-2 px-3 py-2.5 text-sm font-normal leading-snug text-muted opacity-0 shadow-[0_18px_40px_-20px_rgba(0,0,0,0.9)] transition-opacity duration-150 group-hover/help:opacity-100 group-focus-within/help:opacity-100"
+        className="pointer-events-none absolute right-0 top-[calc(100%+8px)] z-30 w-60 rounded-lg border border-line-strong bg-surface-2 px-3 py-2.5 text-sm font-normal leading-snug text-muted opacity-0 shadow-pop transition-opacity duration-150 group-hover/help:opacity-100 group-focus-within/help:opacity-100"
       >
         {props.children}
       </span>
@@ -63,7 +64,7 @@ function InstrumentRow(props: {
         )}
       >
         <span
-          className="size-3 shrink-0 rounded-sm shadow-[0_0_10px_-1px_currentColor]"
+          className="size-3 shrink-0 rounded-sm shadow-glow"
           style={{ background: instrumentColor(name) }}
         />
         <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
@@ -71,12 +72,13 @@ function InstrumentRow(props: {
         </span>
       </div>
       <div className="flex items-center gap-0.5">
-        <button
+        <Button
           type="button"
+          kind="ghost"
           className={clsx(
-            "-my-1 flex size-6 shrink-0 items-center justify-center rounded-md border-none bg-transparent p-0 text-xs font-semibold transition-[opacity,background,color] duration-150 ease-fluid hover:border-none hover:bg-white/[0.08]",
+            "-my-1 flex size-6 shrink-0 items-center justify-center rounded-md text-xs font-semibold transition-[opacity,background,color] duration-150 ease-fluid hover:bg-white/[0.08]",
             soloed
-              ? "text-[#ffcc44] opacity-100"
+              ? "text-accent-2 opacity-100"
               : "text-muted opacity-70 group-hover:opacity-100 hover:text-content",
           )}
           title={soloed ? "Unsolo" : "Solo (mute everything else)"}
@@ -84,13 +86,14 @@ function InstrumentRow(props: {
           onClick={onToggleSolo}
         >
           S
-        </button>
-        <button
+        </Button>
+        <Button
           type="button"
+          kind="ghost"
           className={clsx(
-            "-my-1 flex size-6 shrink-0 items-center justify-center rounded-md border-none bg-transparent p-0 transition-[opacity,background,color] duration-150 ease-fluid hover:border-none hover:bg-white/[0.08]",
+            "-my-1 flex size-6 shrink-0 items-center justify-center rounded-md transition-[opacity,background,color] duration-150 ease-fluid hover:bg-white/[0.08]",
             muted
-              ? "text-[#ff5577] opacity-100"
+              ? "text-red opacity-100"
               : "text-muted opacity-70 group-hover:opacity-100 hover:text-content",
           )}
           title={muted ? "Unmute on MIDI track" : "Mute on MIDI track"}
@@ -98,7 +101,7 @@ function InstrumentRow(props: {
           onClick={onToggleMute}
         >
           {muted ? <IconSoundOff /> : <IconSound />}
-        </button>
+        </Button>
       </div>
     </li>
   );
@@ -164,7 +167,7 @@ export function InstrumentList(props: {
       {hasGiven ? (
         <>
           <h2 className="m-0 mb-3 flex items-center text-base font-semibold">
-            Given instruments
+            Instruments
             <HelpHint>
               The instruments you specified. Greyed-out ones weren't detected in
               the audio.
@@ -179,7 +182,8 @@ export function InstrumentList(props: {
               ),
             )}
           </ul>
-
+          {/* Now we don't allow non-specified instruments to appear, so probably dead code.
+            * Keeping for now in case we go back/make it configurable */}
           {extra.length > 0 && (
             <>
               <h2 className="m-0 mb-3 mt-5 text-base font-semibold">

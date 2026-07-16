@@ -17,8 +17,20 @@
   --color-accent-soft: rgba(255, 91, 122, 0.13);
   --color-accent-glow: rgba(255, 91, 122, 0.5);
   --color-ok: #4ad295;
+  --color-red: #ff5577; /* errors + the mute toggle; the playhead pink */
 
   --radius-card: 12px;
+
+  /* Named shadows so reskins can restyle them from @theme alone:
+     pop     — floating panels (dropdowns, tooltips, menus)
+     overlay — the full-screen drop-target card
+     canvas  — the piano-roll frame
+     glow    — the per-instrument color swatch */
+  --shadow-pop: 0 18px 40px -20px rgba(0, 0, 0, 0.9);
+  --shadow-overlay: 0 24px 60px -24px rgba(0, 0, 0, 0.9);
+  --shadow-canvas:
+    0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 18px 40px -28px rgba(0, 0, 0, 0.9);
+  --shadow-glow: 0 0 10px -1px currentColor;
 
   --ease-fluid: cubic-bezier(0.22, 1, 0.36, 1);
 
@@ -63,6 +75,16 @@
       box-shadow: 0 0 0 0 transparent;
     }
   }
+}
+
+/* Piano-roll canvas palette — pianoroll.ts reads these via getComputedStyle,
+   since canvas drawing can't use utility classes. */
+:root {
+  --roll-stripe: #16161c; /* C-row stripes, key separators, octave labels */
+  --roll-grid: #22222a;
+  --roll-playhead: #ff5577;
+  --roll-key-black: #23232b;
+  --roll-key-white: #cfd2dc;
 }
 
 /* ---- base -------------------------------------------------------------- */

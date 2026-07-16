@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import clsx from "clsx";
+import { Button } from "./Button";
 import { IconChevron, IconDownload } from "./icons";
 
 /**
@@ -101,7 +102,7 @@ export function OutputBar(props: {
   }
 
   const menuItem =
-    "block w-full rounded-none border-0 bg-transparent px-3 py-2 text-left text-[13px] font-normal text-content hover:bg-[#20212b]";
+    "block w-full rounded-none text-left text-[13px] font-normal text-content hover:bg-[#20212b]";
 
   return (
     <div className="col-span-full flex flex-wrap items-center gap-3 rounded-card border border-line bg-surface px-3.5 py-3">
@@ -125,8 +126,9 @@ export function OutputBar(props: {
 
       <div className="ml-auto flex items-center gap-2.5">
         <div className="relative" ref={menuRef}>
-          <button
-            className={clsx("inline-flex items-center gap-2", ready && "btn-primary")}
+          <Button
+            kind={ready ? "primary" : "secondary"}
+            className="inline-flex items-center gap-2"
             disabled={!ready || synthesizing}
             onClick={() => setMenuOpen((o) => !o)}
             aria-haspopup="menu"
@@ -137,13 +139,15 @@ export function OutputBar(props: {
             <IconChevron
               className={clsx("transition-transform", menuOpen && "rotate-180")}
             />
-          </button>
+          </Button>
           {menuOpen && (
             <div
               role="menu"
-              className="absolute left-0 z-20 mt-1.5 min-w-48 overflow-hidden rounded-md border border-line-strong bg-surface-2 py-1 shadow-[0_18px_40px_-20px_rgba(0,0,0,0.9)]"
+              className="absolute left-0 z-20 mt-1.5 min-w-48 overflow-hidden rounded-md border border-line-strong bg-surface-2 py-1 shadow-pop"
             >
-              <button
+              <Button
+                kind="ghost"
+                pad="px-3 py-2"
                 role="menuitem"
                 className={menuItem}
                 onClick={() => {
@@ -152,8 +156,10 @@ export function OutputBar(props: {
                 }}
               >
                 MIDI file
-              </button>
-              <button
+              </Button>
+              <Button
+                kind="ghost"
+                pad="px-3 py-2"
                 role="menuitem"
                 className={menuItem}
                 title="Just the transcribed notes, played with a SoundFont (mono)"
@@ -163,8 +169,10 @@ export function OutputBar(props: {
                 }}
               >
                 WAV - transcription only
-              </button>
-              <button
+              </Button>
+              <Button
+                kind="ghost"
+                pad="px-3 py-2"
                 role="menuitem"
                 className={menuItem}
                 title="Original audio (L) + transcribed notes played with a SoundFont (R)"
@@ -174,18 +182,18 @@ export function OutputBar(props: {
                 }}
               >
                 WAV - stereo with original
-              </button>
+              </Button>
             </div>
           )}
         </div>
-        <button
+        <Button
           onClick={(e) => {
             e.currentTarget.blur();
             onTranscribeAnother();
           }}
         >
           Transcribe another file
-        </button>
+        </Button>
       </div>
     </div>
   );

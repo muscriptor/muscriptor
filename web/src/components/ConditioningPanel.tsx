@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import clsx from "clsx";
+import { Button } from "./Button";
 import { label, scoreInstrument } from "../instruments";
 
 /**
@@ -106,20 +107,21 @@ export function ConditioningPanel(props: {
           <h2 className="m-0 text-lg font-semibold">
             What instruments are there in this track?
           </h2>
-          <p className="text-gray">
+          <p className="text-faint">
             Optional. Leave empty to let the model detect anything; listing
             instruments here forbids every other instrument from appearing.
           </p>
         </div>
         <div className="ml-auto">
-          <button
+          <Button
             type="button"
-            className="px-3.5 py-1 text-xs"
+            size="text-xs"
+            pad="px-3.5 py-1"
             onClick={() => onChange(new Set())}
             disabled={selected.size === 0}
           >
             Clear
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -134,9 +136,10 @@ export function ConditioningPanel(props: {
               key={name}
             >
               {label(name)}
-              <button
+              <Button
                 type="button"
-                className="grid size-4 place-content-center rounded border-none bg-transparent p-0 text-sm leading-none text-muted hover:border-none hover:bg-white/10 hover:text-content"
+                kind="ghost"
+                className="grid size-4 place-content-center rounded text-sm leading-none text-muted hover:bg-white/10 hover:text-content"
                 aria-label={`Remove ${label(name)}`}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -144,7 +147,7 @@ export function ConditioningPanel(props: {
                 }}
               >
                 ×
-              </button>
+              </Button>
             </span>
           ))}
           <input
@@ -165,7 +168,7 @@ export function ConditioningPanel(props: {
 
         {open && suggestions.length > 0 && (
           <ul
-            className="absolute inset-x-0 top-[calc(100%+5px)] z-20 m-0 max-h-60 list-none overflow-y-auto rounded-lg border border-line-strong bg-surface-2 p-1 shadow-[0_18px_40px_-20px_rgba(0,0,0,0.9)]"
+            className="absolute inset-x-0 top-[calc(100%+5px)] z-20 m-0 max-h-60 list-none overflow-y-auto rounded-lg border border-line-strong bg-surface-2 p-1 shadow-pop"
             role="listbox"
           >
             {suggestions.map((name, i) => (
