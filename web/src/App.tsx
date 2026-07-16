@@ -10,6 +10,7 @@ import { InstrumentList } from "./components/InstrumentList";
 import { DropOverlay } from "./components/DropOverlay";
 import { Footer } from "./components/Footer";
 import { WelcomeScreen } from "./components/WelcomeScreen";
+import { ConsentBanner } from "./components/ConsentBanner";
 import { track } from "./analytics";
 
 /**
@@ -142,7 +143,6 @@ export function App() {
   // Load the bundled demo track and pre-fill conditioning with a reasonable
   // guess for it (a rock track). The user still reviews and hits "Transcribe".
   async function useExample() {
-    track("example_selected");
     const resp = await fetch(EXAMPLE.url);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const blob = await resp.blob();
@@ -387,6 +387,8 @@ export function App() {
       )}
 
       <Footer />
+
+      <ConsentBanner />
 
       {screen === "transcribe" && <DropOverlay />}
     </>
