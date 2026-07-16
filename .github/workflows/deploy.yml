@@ -21,7 +21,10 @@ jobs:
         echo "${{ secrets.DEPLOYMENT_SSH_KEY }}" > ~/.ssh/id_ed25519
         chmod 600 ~/.ssh/id_ed25519
         ssh-keyscan muscriptor.kyutai.org >> ~/.ssh/known_hosts
-        cat "${{ secrets.DEPLOYMENT_REGISTRY_SECRET }}" | docker login rg.fr-par.scw.cloud/tf-muscriptor-images -u nologin --password-stdin
+    - name: Log in to the container registry
+      env:
+        REGISTRY_SECRET: ${{ secrets.DEPLOYMENT_REGISTRY_SECRET }}
+      run: echo "$REGISTRY_SECRET" | docker login rg.fr-par.scw.cloud -u nologin --password-stdin
     - name: Deploy
       env:
         HF_TOKEN: ${{ secrets.DEPLOYMENT_HF_TOKEN }}
