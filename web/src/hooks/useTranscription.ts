@@ -3,6 +3,7 @@ import { streamTranscribe, TranscribeError } from "../sse";
 import type { AudioEngine } from "../audio";
 import type { ProgressEstimator } from "../progress";
 import { PianoRoll, type RollNote } from "../pianoroll";
+import { audioBufferToWavFile } from "../wav";
 
 type StartEvent = {
   type: "start";
@@ -152,8 +153,6 @@ export function useTranscription(deps: TranscriptionDeps) {
   }
 
   async function transcribe(file: File) {
-    // Remember the source audio so the mix download can re-upload it.
-    setCurrentFile(file);
     // Cancel any previous run before resetting state for this one.
     activeRef.current?.abort();
     const controller = new AbortController();
@@ -164,22 +163,30 @@ export function useTranscription(deps: TranscriptionDeps) {
     reset();
     clearMidi();
     progress.reset();
-    midiFilenameRef.current = file.name.replace(/\.[^/.]+$/, "") + ".mid";
+    const stem = file.name.replace(/\.[^/.]+$/, "");
+    midiFilenameRef.current = stem + ".mid";
     setAppState("transcribing");
     // Resume the AudioContext now, while we still have the user-gesture
     // activation from the drop / file-pick. Without this, calling play()
     // later — even from a click — sometimes can't unlock the context.
     audio.unlock().catch(() => {});
-    // Decode the WAV in parallel with the transcription so it's ready by the
-    // time the user hits play.
-    audio.loadWav(file).catch(() => {});
+    // Decode in the browser first (also readies playback): the upload is the
+    // decoded audio re-encoded as WAV, so the server accepts anything the
+    // browser can play (m4a/AAC included, which the server can't decode
+    // itself). If the browser can't decode it, fall back to uploading the
+    // raw file and let the server try.
+    const buffer = await audio.loadWav(file);
+    if (isStale()) return;
+    const upload = buffer !== null ? audioBufferToWavFile(buffer, stem + ".wav") : file;
+    // Remember the (decoded) source audio so the mix download can re-upload it.
+    setCurrentFile(upload);
     let maxEnd = 0;
     try {
       const cond = getConditioning();
       const extra = cond.length > 0 ? { instruments: cond } : undefined;
       for await (const raw of streamTranscribe(
         "/transcribe",
-        file,
+        upload,
         extra,
         controller.signal,
       )) {

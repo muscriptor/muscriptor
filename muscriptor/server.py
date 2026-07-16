@@ -1,7 +1,7 @@
 """FastAPI server exposing transcription as an SSE event stream.
 
 POST /transcribe with an audio file (multipart/form-data field `file`; WAV,
-or any format soundfile/libsndfile can read — mp3, flac, ogg, m4a, …) returns
+or any format soundfile/libsndfile can read — mp3, flac, ogg, …) returns
 `text/event-stream`. Each event's data is a JSON dict tagged by `type`:
 `start` / `end` note events (same shape as `muscriptor.main._event_to_dict`),
 `progress` chunk anchors (`{completed, total}`), and a final `midi` event
@@ -105,10 +105,10 @@ def create_app(model: TranscriptionModel, web_dir: str | Path | None = None) -> 
         data = await file.read()
         # PCM WAV goes through the stdlib reader (keeps WAV decoding byte-for-byte
         # identical to the CLI); anything that isn't a readable WAV (mp3, flac,
-        # ogg, m4a, …) falls back to soundfile/libsndfile. A genuinely
-        # undecodable upload (corrupt/truncated file, or a format libsndfile
-        # can't read) is the client's fault, so report it as a 400 rather than
-        # letting it surface as a 500.
+        # ogg, …) falls back to soundfile/libsndfile. A genuinely undecodable
+        # upload (corrupt/truncated file, or a format libsndfile can't read,
+        # e.g. m4a/AAC) is the client's fault, so report it as a 400 rather
+        # than letting it surface as a 500.
         try:
             wav, sr = _read_wav_file(io.BytesIO(data))
         except (wave.Error, EOFError):

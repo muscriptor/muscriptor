@@ -147,12 +147,14 @@ export class AudioEngine {
     for (const n of queued) this.scheduleNoteRaw(n);
   }
 
-  /** Decode `file` and remember the buffer for synced WAV playback. */
-  async loadWav(file: File) {
+  /** Decode `file` and remember the buffer for synced WAV playback.
+   *  Returns the decoded buffer (also used to build the WAV upload), or null
+   *  if the browser can't decode this format — playback stays MIDI-only. */
+  async loadWav(file: File): Promise<AudioBuffer | null> {
     this.stopWavSource();
     this.wavBuffer = null;
-    const bytes = await file.arrayBuffer();
     try {
+      const bytes = await file.arrayBuffer();
       this.wavBuffer = await this.ctx.decodeAudioData(bytes);
     } catch {
       // Non-decodable input — keep MIDI-only playback.
@@ -160,6 +162,7 @@ export class AudioEngine {
     }
     // The stereo-mode WAV level depends on the buffer's channel count.
     this.applyMix();
+    return this.wavBuffer;
   }
 
   /** Set the MIDI/WAV crossfade. `midiAmount` in [0, 1]. */

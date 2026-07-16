@@ -93,7 +93,7 @@ def load_audio(path: str | Path, target_sr: int = 16000) -> torch.Tensor:
     """Load an audio file and return a mono float32 tensor at target_sr.
 
     PCM WAV files are read with the stdlib `wave` module. Other formats (mp3,
-    flac, ogg, m4a, …) are decoded via `soundfile`. Dispatch is by content, not
+    flac, ogg, …) are decoded via `soundfile`. Dispatch is by content, not
     file extension, so misnamed files (e.g. an MP3 upload saved as .wav) still
     load.
 

@@ -268,8 +268,8 @@ See `muscriptor transcribe --help` for the full list of options.
 
 A browser client is included under `web/`. The FastAPI server serves both
 the UI and a POST `/transcribe` endpoint that streams `NoteStart`/`NoteEnd`
-events back as Server-Sent Events. The UI accepts an audio file (WAV, or any
-format soundfile/libsndfile can read — mp3, flac, ogg, m4a, …) via drag-and-drop,
+events back as Server-Sent Events. The UI accepts an audio file via
+drag-and-drop,
 renders a live piano roll while events arrive, auto-plays once enough notes
 are available, and crossfades between the original WAV and the synthesized
 MIDI playback.
