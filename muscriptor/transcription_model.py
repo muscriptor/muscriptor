@@ -21,6 +21,7 @@ from muscriptor.events import (
     ChunkBoundary,
     NoteEndEvent,
     NoteStartEvent,
+    OpenNoteTracker,
     ProgressEvent,
     decode_model_tokens,
 )
@@ -311,6 +312,7 @@ class TranscriptionModel:
         batch_size: int | None = None,
         no_eos_is_ok: bool = True,
         beam_size: int = 1,
+        prelude_forcing: bool = True,
     ) -> Iterator[NoteStartEvent | NoteEndEvent | ProgressEvent]:
         """Transcribe audio into a stream of note events.
 
@@ -324,13 +326,22 @@ class TranscriptionModel:
         no other instrument can appear in the output. Leave it unset to let
         the model decode whatever instruments it detects.
 
+        ``prelude_forcing`` (default True) teacher-forces each chunk's tie
+        prologue — the tokens declaring which notes are sustained from the
+        previous chunk — from the previous chunk's actually-unfinished notes,
+        instead of letting the model guess (and occasionally re-enter with
+        the wrong instruments). It requires chunks to be generated strictly
+        in order, so while it is on the batch size defaults to (and must be)
+        1; combining it with ``batch_size > 1`` raises ValueError — pass
+        ``prelude_forcing=False`` explicitly to trade chunk-boundary quality
+        for batched throughput.
+
         Interleaved with the note events are coarse :class:`ProgressEvent`
         anchors (``completed`` of ``total`` chunks): one up front with
         ``completed == 0``, then one as each chunk finishes. Consumers that
         only care about notes can ignore them.
         """
-        if batch_size is None:
-            batch_size = 4 if self._device.type == "cuda" else 1
+        batch_size = self._resolve_batch_size(batch_size, prelude_forcing)
 
         # Exact names only here — the CLI resolves abbreviations before
         # calling in (resolve_instrument_names).
@@ -396,6 +407,7 @@ class TranscriptionModel:
                 temperature,
                 cfg_coef,
                 no_eos_is_ok,
+                prelude_forcing,
                 beam_size,
                 forbidden_tokens,
             ),
@@ -416,6 +428,26 @@ class TranscriptionModel:
             file=sys.stderr,
         )
 
+    def _resolve_batch_size(
+        self, batch_size: int | None, prelude_forcing: bool
+    ) -> int:
+        """Default the batch size, favouring transcription quality.
+
+        Prelude forcing needs chunks generated strictly in order, so while it
+        is on (the default) the batch size defaults to — and must be — 1.
+        Batching is an explicit quality trade-off: asking for both raises
+        instead of silently dropping the forcing.
+        """
+        if batch_size is None:
+            return 1 if prelude_forcing else (4 if self._device.type == "cuda" else 1)
+        if prelude_forcing and batch_size > 1:
+            raise ValueError(
+                f"batch_size={batch_size} disables prelude forcing, which lowers "
+                "quality at chunk boundaries; pass prelude_forcing=False to "
+                "accept that trade-off"
+            )
+        return batch_size
+
     # ------------------------------------------------------------------
     def _generate_token_stream(
         self,
@@ -427,6 +459,7 @@ class TranscriptionModel:
         temperature: float,
         cfg_coef: float,
         no_eos_is_ok: bool,
+        prelude_forcing: bool = True,
         beam_size: int = 1,
         forbidden_tokens: torch.Tensor | None = None,
     ) -> Iterator[int | ChunkBoundary | ProgressEvent]:
@@ -438,9 +471,28 @@ class TranscriptionModel:
         the others; once the first chunk hits EOS we flush the next chunk's
         buffered tokens and stream it live, and so on. EOS (and anything after
         it) is dropped.
+
+        With ``prelude_forcing`` (and ``batch_size == 1``, so chunks generate
+        strictly in order), every chunk after the first has its tie prologue
+        teacher-forced: the notes left open by the previous chunk are encoded
+        as ``(program, pitch)…tie`` tokens and passed to ``generate`` as a
+        prompt, so the model can't restate them with the wrong instruments.
+        The forced tokens flow through this stream like generated ones, which
+        keeps the downstream decoder's view consistent by construction.
         """
         eos_id = self._tokenizer.eos_id
         num_chunks = len(seek_times)
+
+        # Chunks in a batch generate concurrently, so with batch_size > 1 the
+        # previous chunk's open notes aren't known when the next one starts —
+        # forcing is only possible chunk-by-chunk. transcribe() rejects that
+        # combination up front (_resolve_batch_size); this guard keeps the
+        # invariant for direct callers too.
+        tracker = None
+        if prelude_forcing and batch_size == 1:
+            tracker = OpenNoteTracker(
+                self._tokenizer._vocab, self._tokenizer.frame_rate
+            )
 
         def boundary(chunk_index: int) -> ChunkBoundary:
             next_seek_time = (
@@ -456,9 +508,23 @@ class TranscriptionModel:
             active = 0  # within-batch index of the chunk streaming live
 
             # The first chunk in the batch streams live from the start.
-            yield boundary(batch_start)
+            bnd = boundary(batch_start)
+            prompt = None
+            if tracker is not None:
+                # Feed the boundary first: it settles the tracker (e.g. a
+                # previous chunk that never emitted its tie token drops all
+                # open notes) so open_keys() is exactly the decoder's view.
+                tracker.feed(bnd)
+                if batch_start > 0:
+                    prompt = torch.tensor(
+                        [self._tokenizer.tie_section_token_ids(tracker.open_keys())],
+                        device=self._device,
+                        dtype=torch.long,
+                    )
+            yield bnd
 
             for step in self._model.generate(
+                prompt=prompt,
                 conditions=batch_conditions,
                 max_gen_len=max_gen_len,
                 use_sampling=use_sampling,
@@ -477,10 +543,13 @@ class TranscriptionModel:
                     tok = row[j]
                     if tok == eos_id:
                         done[j] = True
-                    elif j == active:
-                        yield tok
                     else:
-                        buffers[j].append(tok)
+                        if tracker is not None:
+                            tracker.feed(tok)
+                        if j == active:
+                            yield tok
+                        else:
+                            buffers[j].append(tok)
                 # When the live chunk finishes, flush and stream the next one(s).
                 while active < n and done[active]:
                     active += 1
@@ -525,6 +594,7 @@ class TranscriptionModel:
         batch_size: int | None = None,
         no_eos_is_ok: bool = True,
         beam_size: int = 1,
+        prelude_forcing: bool = True,
     ) -> bytes:
         """Same as :meth:`transcribe` but returns a MIDI file as bytes."""
         events = self.transcribe(
@@ -536,6 +606,7 @@ class TranscriptionModel:
             batch_size=batch_size,
             no_eos_is_ok=no_eos_is_ok,
             beam_size=beam_size,
+            prelude_forcing=prelude_forcing,
         )
         return self.events_to_midi_bytes(events)
 

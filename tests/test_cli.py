@@ -151,6 +151,41 @@ def test_jsonl_to_file_keeps_progress_on_stderr(patched_model, fake_audio, tmp_p
     ]
 
 
+def test_batching_requires_disabling_prelude_forcing(patched_model, fake_audio):
+    """--batch-size > 1 without --no-prelude-forcing is rejected up front,
+    before any model is loaded."""
+    runner = CliRunner()
+    result = runner.invoke(
+        main_mod.app,
+        ["transcribe", str(fake_audio), "-b", "4", "-f", "jsonl", "-o", "-"],
+    )
+    assert result.exit_code == 1
+    assert "--no-prelude-forcing" in result.stderr
+    assert "Loading model" not in result.stderr
+    assert _FakeModel.last_kwargs is None
+
+
+def test_batching_allowed_with_prelude_forcing_disabled(patched_model, fake_audio):
+    runner = CliRunner()
+    result = runner.invoke(
+        main_mod.app,
+        [
+            "transcribe",
+            str(fake_audio),
+            "-b",
+            "4",
+            "--no-prelude-forcing",
+            "-f",
+            "jsonl",
+            "-o",
+            "-",
+        ],
+    )
+    assert result.exit_code == 0, result.stderr
+    assert _FakeModel.last_kwargs["batch_size"] == 4
+    assert _FakeModel.last_kwargs["prelude_forcing"] is False
+
+
 def test_instruments_passed_to_model(patched_model, fake_audio):
     runner = CliRunner()
     result = runner.invoke(

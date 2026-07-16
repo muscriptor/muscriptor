@@ -225,10 +225,33 @@ class MT3Tokenizer:
         )
         self.frame_rate = frame_rate
         self._vocab = build_event_vocab(max_shift_steps)
+        self._token_index = {(e.type, e.value): i for i, e in enumerate(self._vocab)}
         self.num_tokens = len(self._vocab)
         self.eos_id = SPECIAL_TOKENS.index("EOS")
 
         logger.info(f"MT3Tokenizer: {self.num_tokens} tokens")
+
+    def tie_section_token_ids(
+        self, open_note_keys: Iterable[tuple[int, int]]
+    ) -> list[int]:
+        """Encode a tie prologue declaring ``open_note_keys`` as sustained.
+
+        ``open_note_keys`` are the ``(program, pitch)`` pairs of notes still
+        sounding at a chunk boundary. The layout matches the training encoder
+        (``note_event2event``): pairs sorted by (program, pitch), each program
+        token emitted once for its run of pitches, terminated by the ``tie``
+        token. Teacher-forcing these as the start of a chunk pins the model's
+        tie section to the notes actually sustained from the previous chunk.
+        """
+        tokens: list[int] = []
+        program_state: int | None = None
+        for program, pitch in sorted(open_note_keys):
+            if program != program_state:
+                tokens.append(self._token_index[("program", program)])
+                program_state = program
+            tokens.append(self._token_index[("pitch", pitch)])
+        tokens.append(self._token_index[("tie", 0)])
+        return tokens
 
     def forbidden_token_ids(self, instruments: Iterable[str]) -> list[int]:
         """Token ids that must never be sampled when only ``instruments`` may
