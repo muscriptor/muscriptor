@@ -75,6 +75,35 @@ export function instrumentColor(name: string): string {
   return `hsl(${hue}, 70%, 55%)`;
 }
 
+/**
+ * The canvas can't use Tailwind classes, so the skin exposes its palette as
+ * CSS custom properties on :root (see style.css); read once and cache.
+ */
+let rollPalette: {
+  stripe: string;
+  grid: string;
+  playhead: string;
+  keyBlack: string;
+  keyWhite: string;
+  labelFont: string;
+} | null = null;
+
+function palette() {
+  if (rollPalette === null) {
+    const style = getComputedStyle(document.documentElement);
+    const v = (name: string) => style.getPropertyValue(name).trim();
+    rollPalette = {
+      stripe: v("--roll-stripe"),
+      grid: v("--roll-grid"),
+      playhead: v("--roll-playhead"),
+      keyBlack: v("--roll-key-black"),
+      keyWhite: v("--roll-key-white"),
+      labelFont: `10px ${v("--font-sans")}`,
+    };
+  }
+  return rollPalette;
+}
+
 export class PianoRoll {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
@@ -364,7 +393,7 @@ export class PianoRoll {
     ctx.clip();
 
     // Pitch grid: faint horizontal stripes for C notes
-    ctx.fillStyle = "#121212";
+    ctx.fillStyle = palette().stripe;
     for (let p = PITCH_MIN; p <= PITCH_MAX; p++) {
       if (p % 12 === 0) {
         const y = (pitchTop - p) * rowH;
@@ -373,7 +402,7 @@ export class PianoRoll {
     }
 
     // Time grid: vertical lines every second.
-    ctx.strokeStyle = "#282828";
+    ctx.strokeStyle = palette().grid;
     ctx.lineWidth = 1;
     const startSec = Math.floor(offsetSec);
     const endSec = Math.ceil(offsetSec + viewSec);
@@ -448,7 +477,7 @@ export class PianoRoll {
 
     // Playhead
     const px = KEY_WIDTH + (this.playhead - offsetSec) * pxPerSec;
-    ctx.strokeStyle = "#39f2ae";
+    ctx.strokeStyle = palette().playhead;
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.moveTo(px, 0);
@@ -469,16 +498,16 @@ export class PianoRoll {
   ) {
     const showLabels = rowH >= 8;
     if (showLabels) {
-      ctx.font = "10px Satoshi-Variable, sans-serif";
+      ctx.font = palette().labelFont;
       ctx.textBaseline = "middle";
     }
     for (let p = PITCH_MIN; p <= PITCH_MAX; p++) {
       const y = (pitchTop - p) * rowH;
       if (y + rowH < 0 || y > H) continue;
-      ctx.fillStyle = isBlackKey(p) ? "#232323" : "#efefef";
+      ctx.fillStyle = isBlackKey(p) ? palette().keyBlack : palette().keyWhite;
       ctx.fillRect(0, y, KEY_WIDTH, rowH);
       // Thin separator between adjacent keys.
-      ctx.strokeStyle = "#121212";
+      ctx.strokeStyle = palette().stripe;
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(0, y + 0.5);
@@ -486,7 +515,7 @@ export class PianoRoll {
       ctx.stroke();
       // Octave label on each C (MIDI 60 = C4).
       if (showLabels && p % 12 === 0) {
-        ctx.fillStyle = "#121212";
+        ctx.fillStyle = palette().stripe;
         ctx.fillText(`C${p / 12 - 1}`, 4, y + rowH / 2);
       }
     }

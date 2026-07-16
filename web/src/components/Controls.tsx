@@ -47,7 +47,7 @@ export function Controls(props: {
         {playing ? "Pause" : "Play"}
       </Button>
       <Button
-        kind={following ? "square" : "squareOff"}
+        kind={following ? "secondary" : "secondaryOff"}
         aria-pressed={following}
         title={following ? "Stop following the playhead" : "Scroll along with the playhead"}
         onClick={(e) => {
@@ -58,7 +58,7 @@ export function Controls(props: {
         Follow playhead
       </Button>
       <span
-        className="border border-line bg-bg px-2.5 py-1 font-mono text-sm tabular-nums text-muted"
+        className="rounded-md border border-line bg-bg px-2.5 py-1 font-mono text-sm tabular-nums text-muted"
         ref={clockRef}
       >
         0.0s

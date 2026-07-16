@@ -5,7 +5,7 @@ export function DropOverlay() {
       className="drop-overlay pointer-events-none fixed inset-0 z-200 flex items-center justify-center bg-[rgba(18,18,18,0.8)] opacity-0 backdrop-blur-sm transition-opacity duration-150 ease-fluid"
       aria-hidden="true"
     >
-      <div className="flex flex-col items-center gap-3.5 border-2 border-dashed border-accent bg-bg px-16 py-11 text-center">
+      <div className="flex flex-col items-center gap-3.5 rounded-card border-2 border-dashed border-accent bg-bg px-16 py-11 text-center shadow-overlay">
         <svg
           className="h-8 w-32 fill-none stroke-accent stroke-2 [stroke-linecap:round] [stroke-linejoin:round]"
           viewBox="0 0 120 32"

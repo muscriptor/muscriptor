@@ -102,7 +102,7 @@ export function OutputBar(props: {
   }
 
   const menuItem =
-    "block w-full text-left text-[13px] font-normal text-content hover:bg-accent hover:text-black";
+    "block w-full rounded-none text-left text-[13px] font-normal text-content hover:bg-accent hover:text-black";
 
   return (
     <div className="col-span-full flex flex-wrap items-center gap-3 rounded-card border border-line bg-surface px-3.5 py-3 max-[760px]:border-0 max-[760px]:bg-transparent max-[760px]:p-0">
@@ -127,7 +127,7 @@ export function OutputBar(props: {
       <div className="ml-auto flex items-center gap-2.5">
         <div className="relative" ref={menuRef}>
           <Button
-            kind={ready ? "slanted" : "square"}
+            kind={ready ? "primary" : "secondary"}
             className="inline-flex items-center gap-2"
             disabled={!ready || synthesizing}
             onClick={() => setMenuOpen((o) => !o)}
@@ -143,7 +143,7 @@ export function OutputBar(props: {
           {menuOpen && (
             <div
               role="menu"
-              className="absolute left-0 z-20 mt-1.5 min-w-48 overflow-hidden border border-line bg-bg py-1 shadow-md"
+              className="absolute left-0 z-20 mt-1.5 min-w-48 overflow-hidden rounded-md border border-line-strong bg-bg py-1 shadow-pop"
             >
               <Button
                 kind="ghost"

@@ -19,7 +19,7 @@ function HelpHint(props: { children: string }) {
       </span>
       <span
         role="tooltip"
-        className="pointer-events-none absolute right-0 top-[calc(100%+8px)] z-30 w-60 border border-line bg-bg px-3 py-2.5 text-sm font-normal leading-snug text-muted opacity-0 shadow-md transition-opacity duration-150 group-hover/help:opacity-100 group-focus-within/help:opacity-100"
+        className="pointer-events-none absolute right-0 top-[calc(100%+8px)] z-30 w-60 rounded-lg border border-line-strong bg-bg px-3 py-2.5 text-sm font-normal leading-snug text-muted opacity-0 shadow-pop transition-opacity duration-150 group-hover/help:opacity-100 group-focus-within/help:opacity-100"
       >
         {props.children}
       </span>
@@ -30,8 +30,8 @@ function HelpHint(props: { children: string }) {
 /** A given instrument that wasn't detected: gray, struck-through, no controls. */
 function UndetectedRow(props: { name: string }) {
   return (
-    <li className="flex items-center gap-2.5 px-2.5 py-2 text-muted opacity-40 [animation:rise_0.4s_var(--ease-fluid)_both]">
-      <span className="size-3 shrink-0 bg-faint" />
+    <li className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-muted opacity-40 [animation:rise_0.4s_var(--ease-fluid)_both]">
+      <span className="size-3 shrink-0 rounded-sm bg-faint" />
       <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap line-through">
         {label(props.name)}
       </span>
@@ -53,7 +53,7 @@ function InstrumentRow(props: {
   const { name, muted, soloed, onToggleMute, onToggleSolo, onHover } = props;
   return (
     <li
-      className="group flex items-center gap-2.5 px-2.5 py-2 text-muted transition-colors duration-150 ease-fluid hover:bg-white/[0.04] hover:text-content [animation:rise_0.4s_var(--ease-fluid)_both]"
+      className="group flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-muted transition-colors duration-150 ease-fluid hover:bg-white/[0.04] hover:text-content [animation:rise_0.4s_var(--ease-fluid)_both]"
       onMouseEnter={() => onHover(name)}
       onMouseLeave={() => onHover(null)}
     >
@@ -64,7 +64,7 @@ function InstrumentRow(props: {
         )}
       >
         <span
-          className="size-3 shrink-0"
+          className="size-3 shrink-0 rounded-sm shadow-glow"
           style={{ background: instrumentColor(name) }}
         />
         <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
@@ -76,7 +76,7 @@ function InstrumentRow(props: {
           type="button"
           kind="ghost"
           className={clsx(
-            "-my-1 flex size-6 shrink-0 items-center justify-center text-xs font-semibold transition-[opacity,background,color] hover:bg-white/[0.08]",
+            "-my-1 flex size-6 shrink-0 items-center justify-center rounded-md text-xs font-semibold transition-[opacity,background,color] duration-150 ease-fluid hover:bg-white/[0.08]",
             soloed
               ? "text-accent-2 opacity-100"
               : "text-muted opacity-70 group-hover:opacity-100 hover:text-content",
@@ -91,7 +91,7 @@ function InstrumentRow(props: {
           type="button"
           kind="ghost"
           className={clsx(
-            "-my-1 flex size-6 shrink-0 items-center justify-center transition-[opacity,background,color] hover:bg-white/[0.08]",
+            "-my-1 flex size-6 shrink-0 items-center justify-center rounded-md transition-[opacity,background,color] duration-150 ease-fluid hover:bg-white/[0.08]",
             muted
               ? "text-red opacity-100"
               : "text-muted opacity-70 group-hover:opacity-100 hover:text-content",

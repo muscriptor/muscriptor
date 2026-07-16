@@ -181,7 +181,7 @@ export function PianoRollCanvas(props: {
   }, [audio, rollRef, setUserScrolled]);
 
   return (
-    <section className="relative col-start-1 overflow-hidden border border-line bg-surface p-0 animate-rise [animation-delay:0.12s]">
+    <section className="relative col-start-1 overflow-hidden rounded-card border border-line bg-surface p-0 shadow-canvas animate-rise [animation-delay:0.12s]">
       <canvas className="block h-[420px] w-full" width={1200} height={400} ref={canvasRef} />
     </section>
   );

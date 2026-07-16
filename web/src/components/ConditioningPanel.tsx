@@ -130,19 +130,19 @@ export function ConditioningPanel(props: {
 
       <div className="relative" ref={rootRef}>
         <div
-          className="flex min-h-11 cursor-text flex-wrap items-center gap-2 border border-line bg-bg px-2.5 py-2 transition-colors duration-150 ease-fluid focus-within:border-accent"
+          className="flex min-h-11 cursor-text flex-wrap items-center gap-2 rounded-lg border border-line-strong bg-bg px-2.5 py-2 transition-colors duration-150 ease-fluid focus-within:border-accent"
           onClick={() => rootRef.current?.querySelector("input")?.focus()}
         >
           {Array.from(selected).map((name) => (
             <span
-              className="inline-flex select-none items-center gap-1.5 border border-dashed border-accent bg-accent-soft py-1 pl-3 pr-1.5 text-sm text-content"
+              className="inline-flex select-none items-center gap-1.5 rounded-md border border-dashed border-accent bg-accent-soft py-1 pl-3 pr-1.5 text-sm text-content"
               key={name}
             >
               {label(name)}
               <Button
                 type="button"
                 kind="ghost"
-                className="grid size-4 place-content-center text-sm leading-none text-muted hover:bg-white/10 hover:text-content"
+                className="grid size-4 place-content-center rounded text-sm leading-none text-muted hover:bg-white/10 hover:text-content"
                 aria-label={`Remove ${label(name)}`}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -171,7 +171,7 @@ export function ConditioningPanel(props: {
 
         {open && suggestions.length > 0 && (
           <ul
-            className="absolute inset-x-0 top-[calc(100%+5px)] z-20 m-0 max-h-60 list-none overflow-y-auto border border-line bg-bg py-1 shadow-md"
+            className="absolute inset-x-0 top-[calc(100%+5px)] z-20 m-0 max-h-60 list-none overflow-y-auto rounded-lg border border-line-strong bg-bg py-1 shadow-pop"
             role="listbox"
           >
             {suggestions.map((name, i) => (
@@ -180,7 +180,7 @@ export function ConditioningPanel(props: {
                 role="option"
                 aria-selected={i === highlight}
                 className={clsx(
-                  "cursor-pointer px-4 py-2 text-sm",
+                  "cursor-pointer rounded-md px-4 py-2 text-sm",
                   i === highlight ? "bg-accent text-black" : "text-muted",
                 )}
                 onMouseEnter={() => setHighlight(i)}
