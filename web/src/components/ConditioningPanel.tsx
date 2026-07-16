@@ -142,7 +142,7 @@ export function ConditioningPanel(props: {
               <Button
                 type="button"
                 kind="ghost"
-                className="grid size-4 place-content-center text-sm leading-none text-muted hover:bg-white/10 hover:text-content"
+                className="grid size-4 place-content-center rounded text-sm leading-none text-muted hover:bg-white/10 hover:text-content"
                 aria-label={`Remove ${label(name)}`}
                 onClick={(e) => {
                   e.stopPropagation();

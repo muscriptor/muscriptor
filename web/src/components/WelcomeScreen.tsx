@@ -148,7 +148,7 @@ export function WelcomeScreen(props: {
               )}
             </p>
             <Button
-              kind="slanted"
+              kind="primary"
               size="text-base"
               pad="px-7 py-3"
               onClick={() => fileInputRef.current?.click()}
@@ -189,7 +189,7 @@ export function WelcomeScreen(props: {
         <>
           <ConditioningPanel selected={condSelected} onChange={onCondChange} />
           <div className="flex justify-end">
-            <Button kind="slanted" size="text-base" pad="px-9 py-3" onClick={onTranscribe}>
+            <Button kind="primary" size="text-base" pad="px-9 py-3" onClick={onTranscribe}>
               Transcribe
             </Button>
           </div>

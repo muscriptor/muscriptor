@@ -76,7 +76,7 @@ function InstrumentRow(props: {
           type="button"
           kind="ghost"
           className={clsx(
-            "-my-1 flex size-6 shrink-0 items-center justify-center rounded-md text-xs font-semibold transition-[opacity,background,color] hover:bg-white/[0.08]",
+            "-my-1 flex size-6 shrink-0 items-center justify-center rounded-md text-xs font-semibold transition-[opacity,background,color] duration-150 ease-fluid hover:bg-white/[0.08]",
             soloed
               ? "text-accent-2 opacity-100"
               : "text-muted opacity-70 group-hover:opacity-100 hover:text-content",
@@ -91,7 +91,7 @@ function InstrumentRow(props: {
           type="button"
           kind="ghost"
           className={clsx(
-            "-my-1 flex size-6 shrink-0 items-center justify-center rounded-md transition-[opacity,background,color] hover:bg-white/[0.08]",
+            "-my-1 flex size-6 shrink-0 items-center justify-center rounded-md transition-[opacity,background,color] duration-150 ease-fluid hover:bg-white/[0.08]",
             muted
               ? "text-red opacity-100"
               : "text-muted opacity-70 group-hover:opacity-100 hover:text-content",

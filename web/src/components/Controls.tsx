@@ -47,7 +47,7 @@ export function Controls(props: {
         {playing ? "Pause" : "Play"}
       </Button>
       <Button
-        kind={following ? "square" : "squareOff"}
+        kind={following ? "secondary" : "secondaryOff"}
         aria-pressed={following}
         title={following ? "Stop following the playhead" : "Scroll along with the playhead"}
         onClick={(e) => {

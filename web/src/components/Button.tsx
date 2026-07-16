@@ -1,29 +1,20 @@
 import clsx from "clsx";
 import type { ButtonHTMLAttributes } from "react";
 
-type ButtonKind = "square" | "squareOff" | "slanted" | "ghost";
+type ButtonKind = "primary" | "secondary" | "secondaryOff" | "ghost";
 
 // The kyutai.org button styles plus a chrome-less reset:
-//   square    — SquareButton: black, 1px dashed green border, glows on hover.
-//   squareOff — SquareButton's primaryOff: the gray "off" half of a toggle.
-//   slanted   — SlantedButton: green skewed fill behind black text; on hover
-//               the fill retracts leftwards, leaving the outline + white text.
-//   ghost     — no chrome (inline icons, links, menu rows); Tailwind's preflight
-//               already strips button backgrounds/borders, so this is minimal.
+//   primary      — SlantedButton: green skewed fill behind black text; on
+//                  hover the fill retracts leftwards, leaving the outline +
+//                  white text.
+//   secondary    — SquareButton: black, 1px dashed green border, glows on
+//                  hover.
+//   secondaryOff — SquareButton's primaryOff: the gray "off" half of a toggle.
+//   ghost        — no chrome (inline icons, links, menu rows); Tailwind's
+//                  preflight already strips button backgrounds/borders, so
+//                  this is minimal.
 const kindToClass: Record<ButtonKind, string> = {
-  square: clsx(
-    "border border-dashed border-accent bg-black font-medium text-accent",
-    "drop-shadow-[0_0.2rem_0.15rem_var(--color-surface)]",
-    "enabled:hover:shadow-[0_0_10px_var(--color-accent)]",
-    "disabled:border-line disabled:text-line",
-  ),
-  squareOff: clsx(
-    "border border-dashed border-faint bg-black font-medium text-muted",
-    "drop-shadow-[0_0.2rem_0.15rem_var(--color-surface)]",
-    "enabled:hover:shadow-[0_0_10px_var(--color-faint)]",
-    "disabled:border-line disabled:text-line",
-  ),
-  slanted: clsx(
+  primary: clsx(
     // isolate keeps the -z-10 fill behind the label without lifting the
     // button above sibling popovers (e.g. the instrument suggestions).
     "relative isolate font-semibold text-black",
@@ -32,6 +23,18 @@ const kindToClass: Record<ButtonKind, string> = {
     "after:transition-[width] after:duration-300 after:ease-in-out",
     "enabled:hover:text-white enabled:hover:after:w-0",
     "disabled:text-faint disabled:after:border-dashed disabled:after:border-faint disabled:after:bg-surface",
+  ),
+  secondary: clsx(
+    "border border-dashed border-accent bg-black font-medium text-accent",
+    "drop-shadow-[0_0.2rem_0.15rem_var(--color-surface)]",
+    "enabled:hover:shadow-[0_0_10px_var(--color-accent)]",
+    "disabled:border-line disabled:text-line",
+  ),
+  secondaryOff: clsx(
+    "border border-dashed border-faint bg-black font-medium text-muted",
+    "drop-shadow-[0_0.2rem_0.15rem_var(--color-surface)]",
+    "enabled:hover:shadow-[0_0_10px_var(--color-faint)]",
+    "disabled:border-line disabled:text-line",
   ),
   ghost: "p-0",
 };
@@ -42,7 +45,7 @@ const kindToClass: Record<ButtonKind, string> = {
  * class order — would decide the winner); `className` is for everything else.
  */
 export function Button({
-  kind = "square",
+  kind = "secondary",
   size,
   pad,
   className,

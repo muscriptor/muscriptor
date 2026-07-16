@@ -95,6 +95,16 @@
   }
 }
 
+/* Piano-roll canvas palette — pianoroll.ts reads these via getComputedStyle,
+   since canvas drawing can't use utility classes. */
+:root {
+  --roll-stripe: #121212; /* C-row stripes, key separators, octave labels */
+  --roll-grid: #282828;
+  --roll-playhead: #39f2ae;
+  --roll-key-black: #232323;
+  --roll-key-white: #efefef;
+}
+
 /* ---- base -------------------------------------------------------------- */
 
 @layer base {
@@ -116,8 +126,8 @@
 }
 
 /* ---- signature surfaces ------------------------------------------------- */
-/* Button styles live in components/Button.tsx (square / squareOff / slanted /
-   ghost — the kyutai.org SquareButton & SlantedButton kinds). */
+/* Button styles live in components/Button.tsx (primary / secondary /
+   secondaryOff / ghost — the kyutai.org SlantedButton & SquareButton kinds). */
 
 /* Bordered panel on the flat background — kyutai boxes are square, hairline
    #343434, unshadowed. */
