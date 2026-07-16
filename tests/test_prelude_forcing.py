@@ -1,10 +1,14 @@
 """Tests for teacher-forced tie prologues (prelude forcing).
 
-Covers the three layers of the feature:
+Covers the layers of the feature:
 - MT3Tokenizer.tie_section_token_ids produces exactly the training encoder's
   tie-prologue layout;
-- OpenNoteTracker stays in lockstep with decode_model_tokens' open-note
-  bookkeeping (parity-checked by feeding both the same streams);
+- OpenNoteTracker (the single decode state machine) keeps an open-note set
+  that agrees with the events decode_model_tokens builds from its actions
+  (checked by feeding both the same streams);
+- TranscriptionModel._resolve_batch_size makes forcing the quality default:
+  batch size defaults to 1 with forcing on, and batching requires explicitly
+  disabling the forcing;
 - _generate_token_stream forces the prologue of every chunk after the first
   (batch_size == 1 only, and only when prelude_forcing is on), via the
   `prompt` argument of LMModel.generate — whose prompt path is exercised here
@@ -197,6 +201,35 @@ def test_chunk_ending_mid_prologue_closes_everything_at_next_boundary():
     chunk1 = [_tok("program", 0), _tok("pitch", 60)]  # never reaches its tie token
     chunk2 = _encode([], start_time=10.0)
     _assert_open([(0.0, 5.0, chunk0), (5.0, 10.0, chunk1), (10.0, None, chunk2)], [])
+
+
+# ---------------------------------------------------------------------------
+# _resolve_batch_size: prelude forcing is the quality default
+# ---------------------------------------------------------------------------
+
+
+def _resolve(device_type: str, batch_size, prelude_forcing) -> int:
+    fake = SimpleNamespace(_device=SimpleNamespace(type=device_type))
+    return TranscriptionModel._resolve_batch_size(fake, batch_size, prelude_forcing)
+
+
+def test_default_batch_size_is_1_while_forcing():
+    assert _resolve("cuda", None, True) == 1
+    assert _resolve("cpu", None, True) == 1
+
+
+def test_default_batch_size_without_forcing_follows_device():
+    assert _resolve("cuda", None, False) == 4
+    assert _resolve("cpu", None, False) == 1
+
+
+def test_batching_with_forcing_raises():
+    with pytest.raises(ValueError, match="prelude_forcing=False"):
+        _resolve("cuda", 4, True)
+
+
+def test_explicit_batch_size_1_keeps_forcing():
+    assert _resolve("cuda", 1, True) == 1
 
 
 # ---------------------------------------------------------------------------

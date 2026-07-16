@@ -331,15 +331,17 @@ class TranscriptionModel:
         previous chunk — from the previous chunk's actually-unfinished notes,
         instead of letting the model guess (and occasionally re-enter with
         the wrong instruments). It requires chunks to be generated strictly
-        in order, so it is automatically disabled when ``batch_size`` > 1.
+        in order, so while it is on the batch size defaults to (and must be)
+        1; combining it with ``batch_size > 1`` raises ValueError — pass
+        ``prelude_forcing=False`` explicitly to trade chunk-boundary quality
+        for batched throughput.
 
         Interleaved with the note events are coarse :class:`ProgressEvent`
         anchors (``completed`` of ``total`` chunks): one up front with
         ``completed == 0``, then one as each chunk finishes. Consumers that
         only care about notes can ignore them.
         """
-        if batch_size is None:
-            batch_size = 4 if self._device.type == "cuda" else 1
+        batch_size = self._resolve_batch_size(batch_size, prelude_forcing)
 
         # Exact names only here — the CLI resolves abbreviations before
         # calling in (resolve_instrument_names).
@@ -426,6 +428,26 @@ class TranscriptionModel:
             file=sys.stderr,
         )
 
+    def _resolve_batch_size(
+        self, batch_size: int | None, prelude_forcing: bool
+    ) -> int:
+        """Default the batch size, favouring transcription quality.
+
+        Prelude forcing needs chunks generated strictly in order, so while it
+        is on (the default) the batch size defaults to — and must be — 1.
+        Batching is an explicit quality trade-off: asking for both raises
+        instead of silently dropping the forcing.
+        """
+        if batch_size is None:
+            return 1 if prelude_forcing else (4 if self._device.type == "cuda" else 1)
+        if prelude_forcing and batch_size > 1:
+            raise ValueError(
+                f"batch_size={batch_size} disables prelude forcing, which lowers "
+                "quality at chunk boundaries; pass prelude_forcing=False to "
+                "accept that trade-off"
+            )
+        return batch_size
+
     # ------------------------------------------------------------------
     def _generate_token_stream(
         self,
@@ -463,17 +485,13 @@ class TranscriptionModel:
 
         # Chunks in a batch generate concurrently, so with batch_size > 1 the
         # previous chunk's open notes aren't known when the next one starts —
-        # forcing is only possible chunk-by-chunk.
+        # forcing is only possible chunk-by-chunk. transcribe() rejects that
+        # combination up front (_resolve_batch_size); this guard keeps the
+        # invariant for direct callers too.
         tracker = None
         if prelude_forcing and batch_size == 1:
             tracker = OpenNoteTracker(
                 self._tokenizer._vocab, self._tokenizer.frame_rate
-            )
-        elif prelude_forcing and num_chunks > 1:
-            print(
-                "[muscriptor] prelude forcing disabled (requires batch_size=1, "
-                f"got {batch_size})",
-                file=sys.stderr,
             )
 
         def boundary(chunk_index: int) -> ChunkBoundary:

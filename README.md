@@ -187,14 +187,16 @@ class TranscriptionModel:
                 instrument can appear in the output. Leave unset to let
                 the model decode whatever instruments it detects.
             batch_size: Number of 5-second chunks processed per forward
-                pass. `None` (default) picks a value based on the device:
-                1 on CPU, 4 on GPU. Use `batch_size=1` for the lowest
-                streaming latency — larger batches process several chunks
-                together, so events belonging to later chunks of a batch
-                won't arrive until the whole batch finishes. Within a
-                batch, events are always yielded in temporal order; all
-                events from chunk N are emitted before any event from
-                chunk N+1.
+                pass. `None` (default) resolves to 1 while prelude forcing
+                is on; with `prelude_forcing=False` it picks a value based
+                on the device: 1 on CPU, 4 on GPU. Values > 1 trade
+                chunk-boundary quality for throughput and therefore require
+                `prelude_forcing=False` (ValueError otherwise). Batching
+                also delays streaming: several chunks generate together, so
+                events belonging to later chunks of a batch won't arrive
+                until the whole batch finishes. Within a batch, events are
+                always yielded in temporal order; all events from chunk N
+                are emitted before any event from chunk N+1.
             no_eos_is_ok: If True, a chunk that doesn't emit EOS within
                 the generation budget produces a warning instead of raising.
             beam_size: Beam search width. 1 (default) uses greedy decoding
@@ -206,8 +208,9 @@ class TranscriptionModel:
                 previous chunk's actually-unfinished notes, instead of
                 letting the model guess (which occasionally makes a chunk
                 restart with the wrong instruments). Requires chunks to be
-                generated strictly in order, so it is automatically disabled
-                when batch_size > 1.
+                generated strictly in order, so it only works with
+                batch_size=1 (the default); set prelude_forcing=False
+                explicitly to use larger batches.
 
         Returns:
             Generator of NoteStartEvent, NoteEndEvent and ProgressEvent
@@ -268,9 +271,11 @@ muscriptor transcribe audio.wav --sampling -t 0.8
 muscriptor transcribe audio.wav --beam-size 4
 
 # Notes sustained across a chunk boundary are teacher-forced into the next
-# chunk's prologue by default (batch size 1 only), so a chunk can't restart
-# them with the wrong instrument. Disable with:
-muscriptor transcribe audio.wav --no-prelude-forcing
+# chunk's prologue by default, so a chunk can't restart them with the wrong
+# instrument. This needs chunks generated in order, so the batch size
+# defaults to 1; batching (faster on GPU, lower quality at chunk boundaries)
+# must be opted into explicitly:
+muscriptor transcribe audio.wav --no-prelude-forcing --batch-size 4
 
 # Render a stereo check-mix of the result (left channel = original audio,
 # right channel = synthesized MIDI; requires fluidsynth on PATH)
