@@ -141,7 +141,7 @@ export function OutputBar(props: {
           {menuOpen && (
             <div
               role="menu"
-              className="absolute left-0 z-20 mt-1.5 min-w-48 overflow-hidden rounded-md border border-line-strong bg-surface-2 py-1 shadow-[0_18px_40px_-20px_rgba(0,0,0,0.9)]"
+              className="absolute left-0 z-20 mt-1.5 min-w-48 overflow-hidden rounded-md border border-line-strong bg-surface-2 py-1 shadow-pop"
             >
               <button
                 role="menuitem"

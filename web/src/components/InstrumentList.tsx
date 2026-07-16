@@ -18,7 +18,7 @@ function HelpHint(props: { children: string }) {
       </span>
       <span
         role="tooltip"
-        className="pointer-events-none absolute right-0 top-[calc(100%+8px)] z-30 w-60 rounded-lg border border-line-strong bg-surface-2 px-3 py-2.5 text-sm font-normal leading-snug text-muted opacity-0 shadow-[0_18px_40px_-20px_rgba(0,0,0,0.9)] transition-opacity duration-150 group-hover/help:opacity-100 group-focus-within/help:opacity-100"
+        className="pointer-events-none absolute right-0 top-[calc(100%+8px)] z-30 w-60 rounded-lg border border-line-strong bg-surface-2 px-3 py-2.5 text-sm font-normal leading-snug text-muted opacity-0 shadow-pop transition-opacity duration-150 group-hover/help:opacity-100 group-focus-within/help:opacity-100"
       >
         {props.children}
       </span>
@@ -63,7 +63,7 @@ function InstrumentRow(props: {
         )}
       >
         <span
-          className="size-3 shrink-0 rounded-sm shadow-[0_0_10px_-1px_currentColor]"
+          className="size-3 shrink-0 rounded-sm shadow-glow"
           style={{ background: instrumentColor(name) }}
         />
         <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap">

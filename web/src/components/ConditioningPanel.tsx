@@ -106,7 +106,7 @@ export function ConditioningPanel(props: {
           <h2 className="m-0 text-lg font-semibold">
             What instruments are there in this track?
           </h2>
-          <p className="text-gray">
+          <p className="text-faint">
             Optional. Leave empty to let the model detect anything; listing
             instruments here forbids every other instrument from appearing.
           </p>
@@ -165,7 +165,7 @@ export function ConditioningPanel(props: {
 
         {open && suggestions.length > 0 && (
           <ul
-            className="absolute inset-x-0 top-[calc(100%+5px)] z-20 m-0 max-h-60 list-none overflow-y-auto rounded-lg border border-line-strong bg-surface-2 p-1 shadow-[0_18px_40px_-20px_rgba(0,0,0,0.9)]"
+            className="absolute inset-x-0 top-[calc(100%+5px)] z-20 m-0 max-h-60 list-none overflow-y-auto rounded-lg border border-line-strong bg-surface-2 p-1 shadow-pop"
             role="listbox"
           >
             {suggestions.map((name, i) => (

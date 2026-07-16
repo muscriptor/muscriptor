@@ -20,6 +20,17 @@
 
   --radius-card: 12px;
 
+  /* Named shadows so reskins can restyle them from @theme alone:
+     pop     — floating panels (dropdowns, tooltips, menus)
+     overlay — the full-screen drop-target card
+     canvas  — the piano-roll frame
+     glow    — the per-instrument color swatch */
+  --shadow-pop: 0 18px 40px -20px rgba(0, 0, 0, 0.9);
+  --shadow-overlay: 0 24px 60px -24px rgba(0, 0, 0, 0.9);
+  --shadow-canvas:
+    0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 18px 40px -28px rgba(0, 0, 0, 0.9);
+  --shadow-glow: 0 0 10px -1px currentColor;
+
   --ease-fluid: cubic-bezier(0.22, 1, 0.36, 1);
 
   --font-serif: "Instrument Serif", Georgia, "Times New Roman", serif;
