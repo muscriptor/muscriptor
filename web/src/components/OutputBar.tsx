@@ -143,7 +143,7 @@ export function OutputBar(props: {
           {menuOpen && (
             <div
               role="menu"
-              className="absolute left-0 z-20 mt-1.5 min-w-48 overflow-hidden border border-line bg-bg py-1 shadow-md"
+              className="absolute left-0 z-20 mt-1.5 min-w-48 overflow-hidden rounded-md border border-line-strong bg-bg py-1 shadow-pop"
             >
               <Button
                 kind="ghost"

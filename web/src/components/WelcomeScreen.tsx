@@ -180,7 +180,7 @@ export function WelcomeScreen(props: {
       </section>
 
       {error?.kind === "file" && (
-        <p className="m-0 border border-red/40 bg-red/10 px-4 py-3 text-sm text-red">
+        <p className="m-0 rounded-xl border border-red/40 bg-red/10 px-4 py-3 text-sm text-red">
           {error.message}
         </p>
       )}

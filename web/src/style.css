@@ -31,7 +31,9 @@
   --color-surface: #191919; /* darkgray */
   --color-surface-2: #232323; /* mediumgray */
   --color-line: #343434; /* gray */
-  --color-line-strong: #4d4d4d;
+  /* The kyutai skin doesn't distinguish strong hairlines — kept equal to
+     --color-line so main's border-line-strong call sites merge cleanly. */
+  --color-line-strong: #343434;
   --color-content: #efefef; /* offwhite */
   --color-muted: rgb(181, 188, 197); /* textgray */
   --color-faint: #656565; /* sublightgray */
@@ -42,7 +44,23 @@
   --color-ok: #39f2ae;
   --color-red: #f55142;
 
+  /* kyutai boxes are square: zero every radius token instead of stripping
+     rounded-* classes at call sites, so those class lists stay identical to
+     main's and merges don't conflict. (rounded-full is hardcoded in Tailwind,
+     so the few square-ified circles are edited in place.) */
+  --radius-sm: 0px;
+  --radius-md: 0px;
+  --radius-lg: 0px;
+  --radius-xl: 0px;
   --radius-card: 0px;
+
+  /* Same idea for main's named shadows: keep the shadow-pop/... utilities at
+     the call sites and restyle them here. The kyutai skin is flat, so only
+     floating panels keep a small shadow (Tailwind's shadow-md value). */
+  --shadow-pop: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  --shadow-overlay: 0 0 #0000;
+  --shadow-canvas: 0 0 #0000;
+  --shadow-glow: 0 0 #0000;
 
   --ease-fluid: cubic-bezier(0.22, 1, 0.36, 1);
 
