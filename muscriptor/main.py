@@ -115,7 +115,11 @@ def transcribe(
         typer.Option(
             "--batch-size",
             "-b",
-            help="Batch size for generation (default: 1 on CPU, 4 on GPU)",
+            help=(
+                "Chunks generated per forward pass (default: 1; with "
+                "--no-prelude-forcing: 4 on GPU, 1 on CPU). Values > 1 lower "
+                "quality at chunk boundaries and require --no-prelude-forcing."
+            ),
         ),
     ] = None,
     strict_eos: Annotated[
@@ -132,6 +136,18 @@ def transcribe(
             help="Beam search width (1 = greedy/sampling, ≥2 enables beam search)",
         ),
     ] = 1,
+    prelude_forcing: Annotated[
+        bool,
+        typer.Option(
+            "--prelude-forcing/--no-prelude-forcing",
+            help=(
+                "Teacher-force each chunk's tie prologue from the previous "
+                "chunk's still-sounding notes, so chunks can't restart with "
+                "the wrong instruments. Needs chunks generated in order, so "
+                "it requires --batch-size 1 (the default)."
+            ),
+        ),
+    ] = True,
     auralize: Annotated[
         Path | None,
         typer.Option(
@@ -186,6 +202,15 @@ def transcribe(
         typer.echo(f"Error: file not found: {audio_file}", err=True)
         raise typer.Exit(1)
 
+    if prelude_forcing and batch_size is not None and batch_size != 1:
+        typer.echo(
+            f"Error: --batch-size {batch_size} requires --no-prelude-forcing: "
+            "batching disables prelude forcing, which lowers transcription "
+            "quality at chunk boundaries.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
     is_stdout = output is not None and str(output) == "-"
 
     if output is None:
@@ -221,6 +246,7 @@ def transcribe(
         batch_size=batch_size,
         no_eos_is_ok=not strict_eos,
         beam_size=beam_size,
+        prelude_forcing=prelude_forcing,
     )
 
     if format == OutputFormat.midi:

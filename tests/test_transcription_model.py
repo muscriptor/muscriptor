@@ -49,6 +49,9 @@ def _run(batches, *, batch_size, seek_times, no_eos_is_ok=False):
         temperature=1.0,
         cfg_coef=2.0,
         no_eos_is_ok=no_eos_is_ok,
+        # The fake tokenizer has no vocab; prelude forcing has its own tests
+        # (test_prelude_forcing.py).
+        prelude_forcing=False,
     )
     return stream, pulled
 
