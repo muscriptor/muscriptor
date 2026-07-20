@@ -10,6 +10,7 @@ from collections.abc import Iterator
 import torch
 from torch import nn
 
+import muscriptor.accelerator
 from muscriptor.modules.conditioners import (
     ConditioningProvider,
     ConditioningAttributes,
@@ -22,7 +23,6 @@ from muscriptor.modules.streaming import (
     init_states,
 )
 from muscriptor.modules.transformer import StreamingTransformer
-from muscriptor.utils.device import sync
 import muscriptor.utils.sampling as utils
 
 
@@ -308,10 +308,10 @@ class LMModel(nn.Module):
         if conditions:
             if cfg_coef == 1.0:
                 prepared = self.condition_provider.tokenize(conditions)
-                sync()
+                muscriptor.accelerator.synchronize()
                 _t = time.perf_counter()
                 cfg_conditions: ConditionTensors = self.condition_provider(prepared)
-                sync()
+                muscriptor.accelerator.synchronize()
                 print(
                     f"[muscriptor] encode conditions (total): {time.perf_counter() - _t:.3f}s"
                 )
@@ -327,10 +327,10 @@ class LMModel(nn.Module):
                     "[muscriptor] dataset_name tokens:    ",
                     prepared.get("dataset_name"),
                 )
-                sync()
+                muscriptor.accelerator.synchronize()
                 _t = time.perf_counter()
                 cfg_conditions = self.condition_provider(prepared)
-                sync()
+                muscriptor.accelerator.synchronize()
                 print(
                     f"[muscriptor] encode conditions (total): {time.perf_counter() - _t:.3f}s"
                 )

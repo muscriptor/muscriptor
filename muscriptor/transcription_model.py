@@ -17,6 +17,7 @@ import torch.nn.functional as F
 
 from safetensors.torch import load_file
 
+import muscriptor.accelerator
 from muscriptor.events import (
     ChunkBoundary,
     NoteEndEvent,
@@ -46,17 +47,16 @@ from muscriptor.tokenizer.notes import (
     validate_notes,
 )
 from muscriptor.utils.audio import load_audio, resample
-from muscriptor.utils.device import best_device, sync
 from muscriptor.utils.midi import notes_to_midi
 
 
 @contextlib.contextmanager
 def _timed(label: str, store: list[tuple[str, float]] | None = None):
     """Print and (optionally) record how long a block of work takes."""
-    sync()
+    muscriptor.accelerator.synchronize()
     t0 = time.perf_counter()
     yield
-    sync()
+    muscriptor.accelerator.synchronize()
     dt = time.perf_counter() - t0
     print(f"[muscriptor] {label}: {dt:.2f}s", file=sys.stderr)
     if store is not None:
@@ -279,8 +279,8 @@ class TranscriptionModel:
                 path, an ``hf://`` or ``https://`` URL, or None.  If None, the
                 default ``medium`` variant is downloaded from HuggingFace.
                 Remote URLs are cached under ~/.cache/muscriptor/.
-            device: Torch device to use.  Defaults to CUDA if available,
-                then MPS (Apple Silicon), then CPU.
+            device: Torch device to use.  Defaults to the current accelerator
+                (CUDA, MPS, ...) if one is available, else CPU.
             dtype: Transformer weight/compute dtype: ``"float32"``,
                 ``"float16"``, ``"bfloat16"`` (or the torch dtypes). ``None``
                 picks per device: float16 on MPS (halves memory traffic —
@@ -290,7 +290,11 @@ class TranscriptionModel:
                 outputs are cast at the transformer boundary.
         """
         if device is None:
-            device = best_device()
+            device = (
+                muscriptor.accelerator.current_accelerator()
+                if muscriptor.accelerator.is_available()
+                else torch.device("cpu")
+            )
         elif isinstance(device, str):
             device = torch.device(device)
 
@@ -436,7 +440,7 @@ class TranscriptionModel:
             frame_rate=self._tokenizer.frame_rate,
         )
 
-        sync()
+        muscriptor.accelerator.synchronize()
         print(
             f"[muscriptor] generate total: {time.perf_counter() - t_gen:.2f}s",
             file=sys.stderr,
