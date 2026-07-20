@@ -276,7 +276,8 @@ class TranscriptionModel:
                 path, an ``hf://`` or ``https://`` URL, or None.  If None, the
                 default ``medium`` variant is downloaded from HuggingFace.
                 Remote URLs are cached under ~/.cache/muscriptor/.
-            device: Torch device to use.  Defaults to CUDA if available.
+            device: Torch device to use.  Defaults to the current accelerator
+                (CUDA, MPS, ...) if one is available, else CPU.
         """
         if device is None:
             device = (
