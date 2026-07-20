@@ -29,6 +29,7 @@ def make_model(events=(), midi=FAKE_MIDI):
     model = create_autospec(TranscriptionModel, instance=True)
     model.transcribe.return_value = list(events)
     model.events_to_midi_bytes.return_value = midi
+    model.transcribe_to_midi.return_value = midi
     return model
 
 
@@ -230,3 +231,73 @@ def test_transcribe_passes_instruments(tmp_path):
     )
     assert resp.status_code == 200
     assert model.transcribe.call_args.kwargs["instruments"] == ["violin", "drums"]
+
+
+def test_transcribe_midi_returns_bytes_with_headers(tmp_path):
+    model = make_model()
+    client = TestClient(create_app(model))
+    resp = client.post(
+        "/transcribe/midi",
+        files={"file": ("silent.wav", _wav_bytes(tmp_path), "audio/wav")},
+    )
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "audio/midi"
+    assert resp.headers["content-disposition"] == 'attachment; filename="result.mid"'
+    assert resp.content == FAKE_MIDI
+
+
+def test_transcribe_midi_passes_tensor_and_instruments(tmp_path):
+    import torch
+
+    model = make_model()
+    client = TestClient(create_app(model))
+    resp = client.post(
+        "/transcribe/midi",
+        files={"file": ("silent.wav", _wav_bytes(tmp_path), "audio/wav")},
+        data={"instruments": ["violin", "drums"]},
+    )
+    assert resp.status_code == 200
+    (audio,) = model.transcribe_to_midi.call_args.args
+    assert model.transcribe_to_midi.call_args.kwargs["instruments"] == [
+        "violin",
+        "drums",
+    ]
+    tensor, sr = audio
+    assert isinstance(tensor, torch.Tensor)
+    assert sr == 16000
+    assert tensor.shape[-1] == 1600
+
+
+def test_transcribe_midi_rejects_invalid_wav():
+    client = TestClient(create_app(make_model()), raise_server_exceptions=False)
+    resp = client.post(
+        "/transcribe/midi",
+        files={"file": ("garbage.wav", b"not a wav at all", "audio/wav")},
+    )
+    assert resp.status_code == 400
+
+
+def test_transcribe_midi_rejects_unknown_instrument(tmp_path):
+    client = TestClient(create_app(make_model()), raise_server_exceptions=False)
+    resp = client.post(
+        "/transcribe/midi",
+        files={"file": ("silent.wav", _wav_bytes(tmp_path), "audio/wav")},
+        data={"instruments": ["not_a_real_instrument"]},
+    )
+    assert resp.status_code == 400
+
+
+def test_transcribe_midi_rejects_audio_over_duration_limit(tmp_path, monkeypatch):
+    """Audio longer than the 15-minute cap is rejected with 413, before the
+    model is ever touched."""
+    import muscriptor.server as server_module
+
+    monkeypatch.setattr(server_module, "_MAX_TRANSCRIBE_MIDI_DURATION_S", 0.05)
+    model = make_model()
+    client = TestClient(create_app(model), raise_server_exceptions=False)
+    resp = client.post(
+        "/transcribe/midi",
+        files={"file": ("silent.wav", _wav_bytes(tmp_path), "audio/wav")},
+    )
+    assert resp.status_code == 413
+    model.transcribe_to_midi.assert_not_called()
