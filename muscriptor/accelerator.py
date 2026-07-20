@@ -7,9 +7,8 @@ then MPS directly, in that order.
 
 import torch
 
-_HAS_TORCH_ACCELERATOR = hasattr(torch, "accelerator") and hasattr(
-    torch.accelerator, "is_available"
-)
+_TORCH_VERSION = tuple(int(x) for x in torch.__version__.split("+")[0].split(".")[:2])
+_HAS_TORCH_ACCELERATOR = _TORCH_VERSION >= (2, 6)
 
 
 def is_available() -> bool:
