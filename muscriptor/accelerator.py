@@ -5,10 +5,11 @@ was only added in PyTorch 2.6; on older versions we fall back to checking CUDA
 then MPS directly, in that order.
 """
 
+from packaging.version import Version
+
 import torch
 
-_TORCH_VERSION = tuple(int(x) for x in torch.__version__.split("+")[0].split(".")[:2])
-_HAS_TORCH_ACCELERATOR = _TORCH_VERSION >= (2, 6)
+_HAS_TORCH_ACCELERATOR = Version(torch.__version__.split("+")[0]) >= Version("2.6")
 
 
 def is_available() -> bool:
