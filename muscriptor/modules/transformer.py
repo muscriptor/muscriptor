@@ -53,7 +53,10 @@ class StreamingMultiheadAttention(StatefulModule):
                 device=weight.device,
                 dtype=weight.dtype,
             ),
-            "offset": torch.zeros(1, dtype=torch.long, device=weight.device),
+            # Kept as a plain host int: it is advanced deterministically by the
+            # host-side generate loop, and reading it from a device tensor
+            # (`.item()`) would force a GPU sync per layer per decode step.
+            "offset": 0,
         }
 
     def increment_step(self, state: State, increment: int = 1) -> None:
@@ -63,7 +66,7 @@ class StreamingMultiheadAttention(StatefulModule):
         if state is None:
             return k, v
         cache = state["cache"]
-        end = int(state["offset"].item())
+        end = state["offset"]
         T = k.shape[1]
         cache[0, :, end : end + T] = k
         cache[1, :, end : end + T] = v
@@ -201,10 +204,13 @@ class StreamingTransformer(StatefulModule):
 
         positions = torch.arange(T, device=x.device).view(1, -1, 1)
         positions = positions + offsets.view(-1, 1, 1)
+        # Always compute the sinusoidal embedding in fp32: fp16 cannot even
+        # represent odd integers above 2048, so half-precision positions would
+        # collapse neighbouring timesteps to the same embedding.
         pos_emb = create_sin_embedding(
-            positions, C, max_period=self.max_period, dtype=x.dtype
+            positions, C, max_period=self.max_period, dtype=torch.float32
         )
-        x = x + pos_emb * (positions >= 0).float()
+        x = x + (pos_emb * (positions >= 0).float()).to(x.dtype)
 
         for layer in self.layers:
             x = layer(x, model_state=model_state)

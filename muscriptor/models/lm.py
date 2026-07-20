@@ -167,7 +167,10 @@ class LMModel(nn.Module):
         prepend_length = 0
         if first_step:
             for cond, _ in condition_tensors.values():
-                input_ = torch.cat([cond, input_], dim=1)
+                # Conditioners run in fp32 even when the transformer runs in
+                # half precision (mel numerics degrade in fp16) — cast at the
+                # seam.
+                input_ = torch.cat([cond.to(input_.dtype), input_], dim=1)
             prepend_length = input_.shape[1] - S
 
         transformer_out = self.transformer(

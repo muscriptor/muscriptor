@@ -20,11 +20,15 @@ from muscriptor.utils.download import ModelDownloadError
 app = typer.Typer(add_completion=False, help="muscriptor — audio-to-MIDI transcription")
 
 
-def _load_model(model_path: str | None, device: str | None) -> TranscriptionModel:
+def _load_model(
+    model_path: str | None, device: str | None, dtype: str | None = None
+) -> TranscriptionModel:
     """load_model with CLI-friendly failure: known download problems (missing
     HuggingFace authentication, …) print a plain message instead of a traceback."""
     try:
-        return TranscriptionModel.load_model(weights_path=model_path, device=device)
+        return TranscriptionModel.load_model(
+            weights_path=model_path, device=device, dtype=dtype
+        )
     except ModelDownloadError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
@@ -107,9 +111,19 @@ def transcribe(
     device: Annotated[
         str,
         typer.Option(
-            "--device", "-d", help="Device: 'auto', 'cpu', 'cuda', 'cuda:0', …"
+            "--device", "-d", help="Device: 'auto', 'cpu', 'cuda', 'cuda:0', 'mps', …"
         ),
     ] = "auto",
+    dtype: Annotated[
+        str | None,
+        typer.Option(
+            "--dtype",
+            help=(
+                "Transformer dtype: 'float32', 'float16' or 'bfloat16'. "
+                "Default: float16 on MPS, float32 elsewhere."
+            ),
+        ),
+    ] = None,
     batch_size: Annotated[
         int | None,
         typer.Option(
@@ -226,10 +240,7 @@ def transcribe(
     # All chatty progress/timing info goes to stderr — stdout is reserved for
     # the actual output when `-o -` is used.
     typer.echo("Loading model…", err=True)
-    model = _load_model(model_path, _device)
-    import torch
-
-    model._model = model._model.to(torch.float32)
+    model = _load_model(model_path, _device, dtype)
 
     typer.echo(f"Transcribing {audio_file} …", err=True)
 
@@ -330,9 +341,19 @@ def serve(
     device: Annotated[
         str,
         typer.Option(
-            "--device", "-d", help="Device: 'auto', 'cpu', 'cuda', 'cuda:0', …"
+            "--device", "-d", help="Device: 'auto', 'cpu', 'cuda', 'cuda:0', 'mps', …"
         ),
     ] = "auto",
+    dtype: Annotated[
+        str | None,
+        typer.Option(
+            "--dtype",
+            help=(
+                "Transformer dtype: 'float32', 'float16' or 'bfloat16'. "
+                "Default: float16 on MPS, float32 elsewhere."
+            ),
+        ),
+    ] = None,
 ):
     """Run the HTTP transcription server (POST /transcribe → SSE event stream)."""
     import uvicorn
@@ -341,7 +362,7 @@ def serve(
 
     _device = None if device == "auto" else device
     typer.echo("Loading model…")
-    model = _load_model(model_path, _device)
+    model = _load_model(model_path, _device, dtype)
     web_dir = Path(__file__).resolve().parent / "web_dist"
     fastapi_app = create_app(model, web_dir=web_dir if web_dir.is_dir() else None)
     uvicorn.run(fastapi_app, host=host, port=port)

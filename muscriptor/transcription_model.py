@@ -201,7 +201,9 @@ def _build_model(device: torch.device, cfg: _ModelConfig = _DEFAULT_CONFIG) -> L
         device=device,
     )
 
-    autocast = None
+    # Disabled off-CUDA: on MPS half precision comes from native fp16 weights
+    # (see load_model) — autocast there is measurably slower than fp32.
+    autocast = TorchAutocast(enabled=False)
     if device.type == "cuda":
         autocast = TorchAutocast(enabled=True, device_type="cuda", dtype=torch.float16)
 
@@ -267,6 +269,7 @@ class TranscriptionModel:
         cls,
         weights_path: str | Path | None = None,
         device: str | torch.device | None = None,
+        dtype: str | torch.dtype | None = None,
     ) -> "TranscriptionModel":
         """Load model weights and return a ready-to-use TranscriptionModel.
 
@@ -278,6 +281,13 @@ class TranscriptionModel:
                 Remote URLs are cached under ~/.cache/muscriptor/.
             device: Torch device to use.  Defaults to the current accelerator
                 (CUDA, MPS, ...) if one is available, else CPU.
+            dtype: Transformer weight/compute dtype: ``"float32"``,
+                ``"float16"``, ``"bfloat16"`` (or the torch dtypes). ``None``
+                picks per device: float16 on MPS (halves memory traffic —
+                decode is bandwidth-bound), float32 elsewhere (CUDA gets fp16
+                compute via autocast instead). The conditioning pipeline
+                (mel-spectrogram/class embeddings) always stays in fp32; its
+                outputs are cast at the transformer boundary.
         """
         if device is None:
             device = (
@@ -288,6 +298,11 @@ class TranscriptionModel:
         elif isinstance(device, str):
             device = torch.device(device)
 
+        if dtype is None:
+            dtype = torch.float16 if device.type == "mps" else torch.float32
+        elif isinstance(dtype, str):
+            dtype = getattr(torch, dtype)
+
         source = _resolve_source(weights_path)
         weights_path = download_if_necessary(source)
         model = _build_model(device, _resolve_config(source, weights_path))
@@ -297,6 +312,11 @@ class TranscriptionModel:
         state_dict = _remap_single_codebook_keys(state_dict)
         model.load_state_dict(state_dict)
         model.to(device)
+        if dtype != torch.float32:
+            model.to(dtype)
+            # Conditioners keep fp32 numerics (log-mel of quiet passages
+            # underflows in fp16); LMModel.forward casts their outputs.
+            model.condition_provider.float()
 
         tokenizer = MT3Tokenizer(
             instrument_vocabulary="MT3_FULL_PLUS",
@@ -442,7 +462,9 @@ class TranscriptionModel:
         instead of silently dropping the forcing.
         """
         if batch_size is None:
-            return 1 if prelude_forcing else (4 if self._device.type == "cuda" else 1)
+            if prelude_forcing:
+                return 1
+            return 4 if self._device.type in ("cuda", "mps") else 1
         if prelude_forcing and batch_size > 1:
             raise ValueError(
                 f"batch_size={batch_size} disables prelude forcing, which lowers "

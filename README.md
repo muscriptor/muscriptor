@@ -99,7 +99,9 @@ weights are downloaded and cached automatically. The architecture is a transform
 
 `small` is the practical choice on CPU-only machines, `medium` is the default
 speed/accuracy trade-off, and `large` is the most accurate but really wants a
-GPU. 
+GPU. On Apple Silicon the model runs on Metal (MPS) automatically, in float16
+by default (`--dtype float32` to override) — fast enough that `large`
+transcribes several times faster than real time. 
 ## Usage
 
 ```python
