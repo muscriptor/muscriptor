@@ -48,6 +48,13 @@ You can try it locally with the web UI with:
 uvx muscriptor serve
 ```
 
+On windows, the default PyTorch backend is `cpu`, so to use the GPU on Windows, you'll need to run:
+
+```bash
+uvx --torch-backend=cu128 muscriptor serve
+```
+Use the `--torch-backend=cu128` flag every time you run a `uvx` command on Windows.
+
 or with the CLI:
 
 ```bash
