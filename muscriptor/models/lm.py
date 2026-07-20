@@ -10,6 +10,7 @@ from collections.abc import Iterator
 import torch
 from torch import nn
 
+import muscriptor.accelerator
 from muscriptor.modules.conditioners import (
     ConditioningProvider,
     ConditioningAttributes,
@@ -304,12 +305,10 @@ class LMModel(nn.Module):
         if conditions:
             if cfg_coef == 1.0:
                 prepared = self.condition_provider.tokenize(conditions)
-                if torch.cuda.is_available():
-                    torch.cuda.synchronize()
+                muscriptor.accelerator.synchronize()
                 _t = time.perf_counter()
                 cfg_conditions: ConditionTensors = self.condition_provider(prepared)
-                if torch.cuda.is_available():
-                    torch.cuda.synchronize()
+                muscriptor.accelerator.synchronize()
                 print(
                     f"[muscriptor] encode conditions (total): {time.perf_counter() - _t:.3f}s"
                 )
@@ -325,12 +324,10 @@ class LMModel(nn.Module):
                     "[muscriptor] dataset_name tokens:    ",
                     prepared.get("dataset_name"),
                 )
-                if torch.cuda.is_available():
-                    torch.cuda.synchronize()
+                muscriptor.accelerator.synchronize()
                 _t = time.perf_counter()
                 cfg_conditions = self.condition_provider(prepared)
-                if torch.cuda.is_available():
-                    torch.cuda.synchronize()
+                muscriptor.accelerator.synchronize()
                 print(
                     f"[muscriptor] encode conditions (total): {time.perf_counter() - _t:.3f}s"
                 )

@@ -17,6 +17,7 @@ import torch.nn.functional as F
 
 from safetensors.torch import load_file
 
+import muscriptor.accelerator
 from muscriptor.events import (
     ChunkBoundary,
     NoteEndEvent,
@@ -52,12 +53,10 @@ from muscriptor.utils.midi import notes_to_midi
 @contextlib.contextmanager
 def _timed(label: str, store: list[tuple[str, float]] | None = None):
     """Print and (optionally) record how long a block of work takes."""
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
+    muscriptor.accelerator.synchronize()
     t0 = time.perf_counter()
     yield
-    if torch.cuda.is_available():
-        torch.cuda.synchronize()
+    muscriptor.accelerator.synchronize()
     dt = time.perf_counter() - t0
     print(f"[muscriptor] {label}: {dt:.2f}s", file=sys.stderr)
     if store is not None:
@@ -277,10 +276,15 @@ class TranscriptionModel:
                 path, an ``hf://`` or ``https://`` URL, or None.  If None, the
                 default ``medium`` variant is downloaded from HuggingFace.
                 Remote URLs are cached under ~/.cache/muscriptor/.
-            device: Torch device to use.  Defaults to CUDA if available.
+            device: Torch device to use.  Defaults to the current accelerator
+                (CUDA, MPS, ...) if one is available, else CPU.
         """
         if device is None:
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            device = (
+                muscriptor.accelerator.current_accelerator()
+                if muscriptor.accelerator.is_available()
+                else torch.device("cpu")
+            )
         elif isinstance(device, str):
             device = torch.device(device)
 
@@ -416,8 +420,7 @@ class TranscriptionModel:
             frame_rate=self._tokenizer.frame_rate,
         )
 
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
+        muscriptor.accelerator.synchronize()
         print(
             f"[muscriptor] generate total: {time.perf_counter() - t_gen:.2f}s",
             file=sys.stderr,
