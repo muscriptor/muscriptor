@@ -10,6 +10,7 @@ from collections.abc import Iterator
 import torch
 from torch import nn
 
+import muscriptor.accelerator
 from muscriptor.modules.conditioners import (
     ConditioningProvider,
     ConditioningAttributes,
@@ -166,7 +167,10 @@ class LMModel(nn.Module):
         prepend_length = 0
         if first_step:
             for cond, _ in condition_tensors.values():
-                input_ = torch.cat([cond, input_], dim=1)
+                # Conditioners run in fp32 even when the transformer runs in
+                # half precision (mel numerics degrade in fp16) — cast at the
+                # seam.
+                input_ = torch.cat([cond.to(input_.dtype), input_], dim=1)
             prepend_length = input_.shape[1] - S
 
         transformer_out = self.transformer(
@@ -304,12 +308,10 @@ class LMModel(nn.Module):
         if conditions:
             if cfg_coef == 1.0:
                 prepared = self.condition_provider.tokenize(conditions)
-                if torch.cuda.is_available():
-                    torch.cuda.synchronize()
+                muscriptor.accelerator.synchronize()
                 _t = time.perf_counter()
                 cfg_conditions: ConditionTensors = self.condition_provider(prepared)
-                if torch.cuda.is_available():
-                    torch.cuda.synchronize()
+                muscriptor.accelerator.synchronize()
                 print(
                     f"[muscriptor] encode conditions (total): {time.perf_counter() - _t:.3f}s"
                 )
@@ -325,12 +327,10 @@ class LMModel(nn.Module):
                     "[muscriptor] dataset_name tokens:    ",
                     prepared.get("dataset_name"),
                 )
-                if torch.cuda.is_available():
-                    torch.cuda.synchronize()
+                muscriptor.accelerator.synchronize()
                 _t = time.perf_counter()
                 cfg_conditions = self.condition_provider(prepared)
-                if torch.cuda.is_available():
-                    torch.cuda.synchronize()
+                muscriptor.accelerator.synchronize()
                 print(
                     f"[muscriptor] encode conditions (total): {time.perf_counter() - _t:.3f}s"
                 )

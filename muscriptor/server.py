@@ -6,6 +6,11 @@ or any format soundfile/libsndfile can read — mp3, flac, ogg, m4a, …) return
 `start` / `end` note events (same shape as `muscriptor.main._event_to_dict`),
 `progress` chunk anchors (`{completed, total}`), and a final `midi` event
 carrying the base64-encoded .mid file.
+
+POST /transcribe/midi takes the same upload but blocks until transcription
+completes and returns the raw `audio/midi` bytes directly (no SSE, no
+base64), with a `Content-Disposition: attachment` header. Audio longer than
+15 minutes is rejected with 413.
 """
 
 import asyncio
@@ -53,6 +58,9 @@ def _make_release_once(lock: threading.Lock):
         lock.release()
 
     return release
+
+
+_MAX_TRANSCRIBE_MIDI_DURATION_S = 15 * 60
 
 
 def event_to_dict(ev: NoteStartEvent | NoteEndEvent) -> dict:
@@ -209,6 +217,86 @@ def create_app(model: TranscriptionModel, web_dir: str | Path | None = None) -> 
             media_type="text/event-stream",
             background=BackgroundTask(release_lock),
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
+
+    @app.post("/transcribe/midi")
+    async def transcribe_midi(
+        file: Annotated[UploadFile, File()],
+        instruments: Annotated[list[str], Form(default_factory=list)],
+    ) -> Response:
+        """Transcribe an audio file and return the .mid file directly.
+
+        Unlike /transcribe, this blocks until transcription finishes and
+        returns the raw MIDI bytes (no SSE, no base64) with a
+        Content-Disposition header, so a plain HTTP client can save the
+        response straight to disk.
+        """
+        data = await file.read()
+        try:
+            wav, sr = _read_wav_file(io.BytesIO(data))
+        except (wave.Error, EOFError):
+            try:
+                wav, sr = _read_non_wav_file(io.BytesIO(data))
+            except Exception as e:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"could not decode audio file '{file.filename}': {e}",
+                ) from e
+
+        duration_s = wav.shape[-1] / sr
+        if duration_s > _MAX_TRANSCRIBE_MIDI_DURATION_S:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"audio file is {duration_s / 60:.1f} minutes long; "
+                    f"the limit is {_MAX_TRANSCRIBE_MIDI_DURATION_S // 60:.0f} minutes"
+                ),
+            )
+
+        unknown = [n for n in instruments if n not in MT3_FULL_PLUS_GROUP_NAMES]
+        if unknown:
+            raise HTTPException(
+                status_code=400,
+                detail=f"unknown instrument name(s): {', '.join(unknown)}",
+            )
+
+        # Same mutual-exclusion as /transcribe (the model isn't safe to run
+        # concurrently), but no preemption: this call doesn't stream, so
+        # there's nothing to cancel mid-flight. A concurrent /transcribe
+        # request will just wait for the lock like any other contender.
+        nonlocal current_cancel
+        deadline = time.monotonic() + lock_timeout_s
+        while True:
+            with cancel_guard:
+                if current_cancel is not None:
+                    current_cancel.set()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise HTTPException(
+                    status_code=503,
+                    detail="server busy: another transcription is in progress",
+                )
+            acquired = await asyncio.to_thread(
+                transcribe_lock.acquire, True, min(1.0, remaining)
+            )
+            if acquired:
+                break
+        with cancel_guard:
+            current_cancel = None
+
+        try:
+            midi_bytes = await asyncio.to_thread(
+                model.transcribe_to_midi,
+                (wav, sr),
+                instruments=instruments or None,
+            )
+        finally:
+            transcribe_lock.release()
+
+        return Response(
+            content=midi_bytes,
+            media_type="audio/midi",
+            headers={"Content-Disposition": 'attachment; filename="result.mid"'},
         )
 
     @app.post("/auralize")
