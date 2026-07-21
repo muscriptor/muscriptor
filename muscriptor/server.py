@@ -24,9 +24,9 @@ import threading
 import time
 import wave
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Callable
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
@@ -78,14 +78,65 @@ def create_app(model: TranscriptionModel, web_dir: str | Path | None = None) -> 
 
     transcribe_lock = threading.Lock()
     lock_timeout_s = 60.0
-    # Cancel event of the run currently holding the lock (or the last one to
-    # have held it). A new /transcribe request sets it so an in-flight run
-    # stops at its next event boundary instead of transcribing to completion
-    # for a client that has moved on. This must not rely on TCP disconnects:
-    # aborts don't always reach us (e.g. port forwards / proxies that keep the
-    # upstream connection open after the browser aborts).
+    # State of the run currently holding the lock (or the last one to have held
+    # it), guarded by `cancel_guard`: its cancel event and the id of the client
+    # that started it. A new /transcribe from the SAME client (a resubmit in
+    # the same browser tab) sets the cancel event so the in-flight run stops at
+    # its next event boundary instead of transcribing to completion for a client
+    # that has moved on. A request from a DIFFERENT client never preempts — it
+    # waits for the lock like any other contender, so two independent browser
+    # windows don't kill each other's transcription. This scoping must be done
+    # here rather than by watching the socket: browser aborts don't always reach
+    # us (e.g. port forwards / proxies keep the upstream connection open after
+    # the browser aborts), so a same-tab resubmit can't be detected as a
+    # disconnect.
     cancel_guard = threading.Lock()
     current_cancel: threading.Event | None = None
+    current_client: str | None = None
+
+    async def acquire_transcribe_lock(
+        client_id: str | None, cancellable: bool
+    ) -> tuple[threading.Event | None, Callable[[], None]]:
+        """Acquire the single-transcription lock, preempting only a run started
+        by this same `client_id` (a resubmit). A different client — or an
+        anonymous API caller with no id — never preempts and is never preempted;
+        it just waits for the lock (up to `lock_timeout_s`, then 503).
+
+        Returns `(cancel, release)`: `cancel` is the new run's cancel event
+        (`None` when `cancellable` is False, e.g. the blocking /transcribe/midi
+        render, which can't be stopped mid-flight); `release` frees the lock at
+        most once, from whichever cleanup path runs first.
+        """
+        nonlocal current_cancel, current_client
+        deadline = time.monotonic() + lock_timeout_s
+        while True:
+            with cancel_guard:
+                # Re-signal each iteration so that even a same-client run which
+                # started while we were already waiting (a resubmit that beat us
+                # to the lock) gets cancelled too — the newest request from a
+                # given client always wins. Runs from other clients are left be.
+                if (
+                    current_cancel is not None
+                    and client_id is not None
+                    and current_client == client_id
+                ):
+                    current_cancel.set()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise HTTPException(
+                    status_code=503,
+                    detail="server busy: another transcription is in progress",
+                )
+            acquired = await asyncio.to_thread(
+                transcribe_lock.acquire, True, min(1.0, remaining)
+            )
+            if acquired:
+                break
+        cancel = threading.Event() if cancellable else None
+        with cancel_guard:
+            current_cancel = cancel
+            current_client = client_id
+        return cancel, _make_release_once(transcribe_lock)
 
     @app.get("/health")
     async def health():
@@ -109,6 +160,7 @@ def create_app(model: TranscriptionModel, web_dir: str | Path | None = None) -> 
     async def transcribe(
         file: Annotated[UploadFile, File()],
         instruments: Annotated[list[str], Form(default_factory=list)],
+        x_client_id: Annotated[str | None, Header()] = None,
     ) -> StreamingResponse:
         data = await file.read()
         # PCM WAV goes through the stdlib reader (keeps WAV decoding byte-for-byte
@@ -135,37 +187,16 @@ def create_app(model: TranscriptionModel, web_dir: str | Path | None = None) -> 
                 detail=f"unknown instrument name(s): {', '.join(unknown)}",
             )
 
-        # Preempt whoever holds the lock, then wait for it. The short acquire
-        # timeout re-signals each second so that even a run that started while
-        # we were already waiting (another preempting request that beat us to
-        # the lock) gets cancelled too — the newest request always wins.
-        nonlocal current_cancel
-        deadline = time.monotonic() + lock_timeout_s
-        while True:
-            with cancel_guard:
-                if current_cancel is not None:
-                    current_cancel.set()
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise HTTPException(
-                    status_code=503,
-                    detail="server busy: another transcription is in progress",
-                )
-            acquired = await asyncio.to_thread(
-                transcribe_lock.acquire, True, min(1.0, remaining)
-            )
-            if acquired:
-                break
-        cancel = threading.Event()
-        with cancel_guard:
-            current_cancel = cancel
-
-        # Release exactly once, from whichever path runs first. The generator's
-        # finally covers normal completion, errors and mid-stream disconnects;
-        # the StreamingResponse background task covers the case where the client
-        # disconnects *before* the generator is ever iterated (so its finally
-        # would never run) — which otherwise leaks the lock forever.
-        release_lock = _make_release_once(transcribe_lock)
+        # Acquire the single-transcription lock, preempting only a resubmit from
+        # this same client (see acquire_transcribe_lock). `release_lock` runs
+        # from whichever cleanup path fires first: the generator's finally
+        # (normal completion, errors, mid-stream disconnects) or the
+        # StreamingResponse background task (client disconnects before the
+        # generator is ever iterated, so its finally would never run) — either
+        # way the lock is released exactly once and never leaked.
+        cancel, release_lock = await acquire_transcribe_lock(
+            x_client_id, cancellable=True
+        )
 
         def gen():
             try:
@@ -223,6 +254,7 @@ def create_app(model: TranscriptionModel, web_dir: str | Path | None = None) -> 
     async def transcribe_midi(
         file: Annotated[UploadFile, File()],
         instruments: Annotated[list[str], Form(default_factory=list)],
+        x_client_id: Annotated[str | None, Header()] = None,
     ) -> Response:
         """Transcribe an audio file and return the .mid file directly.
 
@@ -260,30 +292,15 @@ def create_app(model: TranscriptionModel, web_dir: str | Path | None = None) -> 
                 detail=f"unknown instrument name(s): {', '.join(unknown)}",
             )
 
-        # Same mutual-exclusion as /transcribe (the model isn't safe to run
-        # concurrently), but no preemption: this call doesn't stream, so
-        # there's nothing to cancel mid-flight. A concurrent /transcribe
-        # request will just wait for the lock like any other contender.
-        nonlocal current_cancel
-        deadline = time.monotonic() + lock_timeout_s
-        while True:
-            with cancel_guard:
-                if current_cancel is not None:
-                    current_cancel.set()
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise HTTPException(
-                    status_code=503,
-                    detail="server busy: another transcription is in progress",
-                )
-            acquired = await asyncio.to_thread(
-                transcribe_lock.acquire, True, min(1.0, remaining)
-            )
-            if acquired:
-                break
-        with cancel_guard:
-            current_cancel = None
-
+        # Same mutual exclusion as /transcribe, via the shared helper. This run
+        # is not cancellable (it doesn't stream, so there's nothing to stop
+        # mid-flight); cancellable=False records that, so nothing tries to
+        # preempt a blocking MIDI render. A non-browser API caller sends no
+        # client id and so neither preempts nor is preempted — it just waits for
+        # the lock like any other contender.
+        _cancel, release_lock = await acquire_transcribe_lock(
+            x_client_id, cancellable=False
+        )
         try:
             midi_bytes = await asyncio.to_thread(
                 model.transcribe_to_midi,
@@ -291,7 +308,7 @@ def create_app(model: TranscriptionModel, web_dir: str | Path | None = None) -> 
                 instruments=instruments or None,
             )
         finally:
-            transcribe_lock.release()
+            release_lock()
 
         return Response(
             content=midi_bytes,

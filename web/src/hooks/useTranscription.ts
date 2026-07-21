@@ -30,6 +30,15 @@ type StreamedEvent = StartEvent | EndEvent | MidiEvent | ProgressMsg;
 
 export type AppState = "idle" | "transcribing" | "done" | "error";
 
+/** Stable id for this browser tab, sent as `X-Client-Id` on every transcribe
+ *  request. Generated once per JS realm, so it's shared across resubmits within
+ *  a tab (which the server preempts) but distinct between tabs (which the server
+ *  serializes instead of cancelling). */
+const CLIENT_ID =
+  typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `c-${Math.floor(performance.now())}-${Math.random().toString(36).slice(2)}`;
+
 export interface TranscriptionDeps {
   audio: AudioEngine;
   /** Holds the PianoRoll once the canvas has mounted (may be null very early). */
@@ -185,6 +194,7 @@ export function useTranscription(deps: TranscriptionDeps) {
         file,
         extra,
         controller.signal,
+        CLIENT_ID,
       )) {
         // A newer upload took over while we were awaiting — drop this event so
         // it can't repopulate the piano roll / re-schedule old notes.

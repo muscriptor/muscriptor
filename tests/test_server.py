@@ -5,6 +5,8 @@ Uses a fake transcriber so no weights / audio decoding is required.
 
 import base64
 import json
+import threading
+import time
 import wave
 from pathlib import Path
 from unittest.mock import create_autospec
@@ -301,3 +303,108 @@ def test_transcribe_midi_rejects_audio_over_duration_limit(tmp_path, monkeypatch
     )
     assert resp.status_code == 413
     model.transcribe_to_midi.assert_not_called()
+
+
+def _blocking_transcribe_model(first_reached: threading.Event, gate: threading.Event):
+    """A mock whose first `transcribe()` call streams one note, then blocks on
+    `gate` (signalling via `first_reached` once it's blocked) while still holding
+    the lock; later calls stream both notes without blocking. Lets a test force
+    two /transcribe requests to overlap deterministically."""
+    s0 = NoteStartEvent(pitch=60, start_time=0.0, index=0, instrument="piano")
+    e0 = NoteEndEvent(end_time=0.5, start_event=s0)
+    call_lock = threading.Lock()
+    calls = [0]
+
+    def side_effect(*args, **kwargs):
+        with call_lock:
+            calls[0] += 1
+            first = calls[0] == 1
+        yield s0
+        if first:
+            first_reached.set()
+            assert gate.wait(timeout=10), "gate never opened"
+        yield e0
+
+    model = create_autospec(TranscriptionModel, instance=True)
+    model.transcribe.side_effect = side_effect
+    model.events_to_midi_bytes.return_value = FAKE_MIDI
+    return model, s0
+
+
+def _post_transcribe(app, payload, client_id, out, name):
+    # A fresh TestClient per thread (httpx.Client isn't for concurrent use); the
+    # underlying app — and its lock — is shared, which is what we're exercising.
+    client = TestClient(app)
+    resp = client.post(
+        "/transcribe",
+        files={"file": ("silent.wav", payload, "audio/wav")},
+        headers={"X-Client-Id": client_id},
+    )
+    out[name] = _parse_sse(resp.text)
+
+
+def test_concurrent_different_clients_do_not_preempt(tmp_path):
+    """The reported bug: a second window (different client id) must NOT stop the
+    transcription already in progress — it waits for the lock instead."""
+    first_reached = threading.Event()
+    gate = threading.Event()
+    model, s0 = _blocking_transcribe_model(first_reached, gate)
+    app = create_app(model)
+    payload = _wav_bytes(tmp_path)
+    out: dict[str, list] = {}
+
+    a = threading.Thread(target=_post_transcribe, args=(app, payload, "tab-A", out, "A"))
+    a.start()
+    assert first_reached.wait(timeout=5)  # A holds the lock, mid-stream
+
+    b = threading.Thread(target=_post_transcribe, args=(app, payload, "tab-B", out, "B"))
+    b.start()
+    # Give B time to reach the lock; with broken scoping it would cancel A here.
+    time.sleep(0.5)
+    gate.set()
+    a.join(timeout=10)
+    b.join(timeout=10)
+
+    # A ran to completion (ends with the assembled MIDI event) — not preempted.
+    assert out["A"][0] == event_to_dict(s0)
+    assert out["A"][-1] == {
+        "type": "midi",
+        "data": base64.b64encode(FAKE_MIDI).decode("ascii"),
+    }
+    # B, a different client, also completed — after waiting its turn.
+    assert out["B"][-1]["type"] == "midi"
+    assert model.transcribe.call_count == 2
+
+
+def test_concurrent_same_client_preempts(tmp_path):
+    """A resubmit from the SAME client id still preempts the in-flight run so a
+    stale stream stops instead of finishing."""
+    first_reached = threading.Event()
+    gate = threading.Event()
+    model, s0 = _blocking_transcribe_model(first_reached, gate)
+    app = create_app(model)
+    payload = _wav_bytes(tmp_path)
+    out: dict[str, list] = {}
+
+    a = threading.Thread(
+        target=_post_transcribe, args=(app, payload, "same-tab", out, "A")
+    )
+    a.start()
+    assert first_reached.wait(timeout=5)
+
+    b = threading.Thread(
+        target=_post_transcribe, args=(app, payload, "same-tab", out, "B")
+    )
+    b.start()
+    # Let B reach the lock and signal A's cancel (same id → preempt) before A
+    # resumes past the gate.
+    time.sleep(0.5)
+    gate.set()
+    a.join(timeout=10)
+    b.join(timeout=10)
+
+    # A was preempted: it streamed its first note but never the trailing MIDI.
+    assert out["A"] == [event_to_dict(s0)]
+    # B (the resubmit) ran to completion.
+    assert out["B"][-1]["type"] == "midi"
+    assert model.transcribe.call_count == 2
