@@ -84,6 +84,7 @@ def _resolve_source(weights_path: str | Path | None) -> str | Path:
         return _HF_REPO_TEMPLATE.format(size=weights_path)
     return weights_path
 
+
 _SAMPLE_RATE = 16000
 # Must match the segment duration used during training / evaluation.
 _SEGMENT_DURATION = 5.0
@@ -337,6 +338,7 @@ class TranscriptionModel:
         no_eos_is_ok: bool = True,
         beam_size: int = 1,
         prelude_forcing: bool = True,
+        max_generation_tokens: int = 2000,
     ) -> Iterator[NoteStartEvent | NoteEndEvent | ProgressEvent]:
         """Transcribe audio into a stream of note events.
 
@@ -360,11 +362,22 @@ class TranscriptionModel:
         ``prelude_forcing=False`` explicitly to trade chunk-boundary quality
         for batched throughput.
 
+        ``max_generation_tokens`` bounds decoding work independently for each
+        5-second chunk. If a chunk exhausts the budget without EOS,
+        ``no_eos_is_ok`` controls whether transcription warns or raises.
+
         Interleaved with the note events are coarse :class:`ProgressEvent`
         anchors (``completed`` of ``total`` chunks): one up front with
         ``completed == 0``, then one as each chunk finishes. Consumers that
         only care about notes can ignore them.
         """
+        if (
+            isinstance(max_generation_tokens, bool)
+            or not isinstance(max_generation_tokens, int)
+            or max_generation_tokens <= 0
+        ):
+            raise ValueError("max_generation_tokens must be a positive integer")
+
         batch_size = self._resolve_batch_size(batch_size, prelude_forcing)
 
         # Exact names only here — the CLI resolves abbreviations before
@@ -396,7 +409,6 @@ class TranscriptionModel:
 
         segment_samples = int(_SEGMENT_DURATION * _SAMPLE_RATE)
         num_chunks = math.ceil(total_samples / segment_samples)
-        max_gen_len = 2000
         print(
             f"[muscriptor] audio: {total_duration:.1f}s → {num_chunks} chunk(s) of {_SEGMENT_DURATION}s",
             file=sys.stderr,
@@ -426,7 +438,7 @@ class TranscriptionModel:
                 all_conditions,
                 seek_times,
                 batch_size,
-                max_gen_len,
+                max_generation_tokens,
                 use_sampling,
                 temperature,
                 cfg_coef,
@@ -451,9 +463,7 @@ class TranscriptionModel:
             file=sys.stderr,
         )
 
-    def _resolve_batch_size(
-        self, batch_size: int | None, prelude_forcing: bool
-    ) -> int:
+    def _resolve_batch_size(self, batch_size: int | None, prelude_forcing: bool) -> int:
         """Default the batch size, favouring transcription quality.
 
         Prelude forcing needs chunks generated strictly in order, so while it
@@ -620,6 +630,7 @@ class TranscriptionModel:
         no_eos_is_ok: bool = True,
         beam_size: int = 1,
         prelude_forcing: bool = True,
+        max_generation_tokens: int = 2000,
     ) -> bytes:
         """Same as :meth:`transcribe` but returns a MIDI file as bytes."""
         events = self.transcribe(
@@ -632,6 +643,7 @@ class TranscriptionModel:
             no_eos_is_ok=no_eos_is_ok,
             beam_size=beam_size,
             prelude_forcing=prelude_forcing,
+            max_generation_tokens=max_generation_tokens,
         )
         return self.events_to_midi_bytes(events)
 

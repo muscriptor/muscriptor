@@ -203,3 +203,149 @@ def test_instruments_passed_to_model(patched_model, fake_audio):
     )
     assert result.exit_code == 0, result.stderr
     assert _FakeModel.last_kwargs["instruments"] == ["violin", "drums"]
+
+
+def test_generation_budget_passed_to_model(patched_model, fake_audio):
+    runner = CliRunner()
+    result = runner.invoke(
+        main_mod.app,
+        [
+            "transcribe",
+            str(fake_audio),
+            "--max-generation-tokens",
+            "512",
+            "-f",
+            "jsonl",
+            "-o",
+            "-",
+        ],
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert _FakeModel.last_kwargs["max_generation_tokens"] == 512
+
+
+def test_generation_budget_must_be_positive_before_model_load(
+    patched_model, fake_audio
+):
+    runner = CliRunner()
+    result = runner.invoke(
+        main_mod.app,
+        [
+            "transcribe",
+            str(fake_audio),
+            "--max-generation-tokens",
+            "0",
+            "-f",
+            "jsonl",
+            "-o",
+            "-",
+        ],
+    )
+
+    assert result.exit_code != 0
+    assert "x>=1" in result.stderr
+    assert "Loading model" not in result.stderr
+    assert _FakeModel.last_kwargs is None
+
+
+def test_strict_jsonl_file_preserves_existing_output_on_failure(
+    monkeypatch, fake_audio, tmp_path
+):
+    class _FailingModel(_FakeModel):
+        def transcribe(self, **kwargs):
+            type(self).last_kwargs = kwargs
+            yield NoteStartEvent(
+                pitch=60,
+                start_time=0.0,
+                index=0,
+                instrument="piano",
+            )
+            raise RuntimeError("did not emit EOS")
+
+    monkeypatch.setattr(main_mod, "TranscriptionModel", _FailingModel)
+    output = tmp_path / "out.jsonl"
+    output.write_text("previous output\n")
+
+    result = CliRunner().invoke(
+        main_mod.app,
+        [
+            "transcribe",
+            str(fake_audio),
+            "--strict-eos",
+            "-f",
+            "jsonl",
+            "-o",
+            str(output),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert output.read_text() == "previous output\n"
+    assert not list(tmp_path.glob(".out.jsonl.*.tmp"))
+
+
+def test_strict_jsonl_stdout_emits_nothing_on_failure(monkeypatch, fake_audio):
+    class _FailingModel(_FakeModel):
+        def transcribe(self, **kwargs):
+            type(self).last_kwargs = kwargs
+            yield NoteStartEvent(
+                pitch=60,
+                start_time=0.0,
+                index=0,
+                instrument="piano",
+            )
+            raise RuntimeError("did not emit EOS")
+
+    monkeypatch.setattr(main_mod, "TranscriptionModel", _FailingModel)
+
+    result = CliRunner().invoke(
+        main_mod.app,
+        [
+            "transcribe",
+            str(fake_audio),
+            "--strict-eos",
+            "-f",
+            "jsonl",
+            "-o",
+            "-",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert result.stdout == ""
+
+
+def test_strict_jsonl_file_is_replaced_only_after_success(
+    monkeypatch, fake_audio, tmp_path
+):
+    output = tmp_path / "out.jsonl"
+    output.write_text("previous output\n")
+    observed_during_transcription: list[str] = []
+
+    class _ObservingModel(_FakeModel):
+        def transcribe(self, **kwargs):
+            type(self).last_kwargs = kwargs
+            observed_during_transcription.append(output.read_text())
+            yield from super().transcribe(**kwargs)
+            observed_during_transcription.append(output.read_text())
+
+    monkeypatch.setattr(main_mod, "TranscriptionModel", _ObservingModel)
+
+    result = CliRunner().invoke(
+        main_mod.app,
+        [
+            "transcribe",
+            str(fake_audio),
+            "--strict-eos",
+            "-f",
+            "jsonl",
+            "-o",
+            str(output),
+        ],
+    )
+
+    assert result.exit_code == 0, result.stderr
+    assert observed_during_transcription == ["previous output\n", "previous output\n"]
+    assert len(output.read_text().splitlines()) == 4
+    assert not list(tmp_path.glob(".out.jsonl.*.tmp"))

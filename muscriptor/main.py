@@ -1,11 +1,16 @@
 """CLI for muscriptor: audio → MIDI transcription."""
 
+import contextlib
 import dataclasses
+import io
 import json
+import os
 import sys
+import tempfile
+from collections.abc import Iterator
 from enum import Enum
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, TextIO
 
 import typer
 
@@ -48,6 +53,56 @@ def _event_to_dict(ev: NoteStartEvent | NoteEndEvent) -> dict:
         "end_time": ev.end_time,
         "start_event_index": ev.start_event_index,
     }
+
+
+@contextlib.contextmanager
+def _jsonl_output_sink(
+    output: Path, *, is_stdout: bool, atomic: bool
+) -> Iterator[TextIO]:
+    """Yield a JSONL sink, publishing buffered data only after success.
+
+    Normal JSONL output keeps its streaming behavior. Strict-EOS mode uses an
+    in-memory buffer for stdout or a sibling temporary file for file output so
+    a late chunk failure cannot publish a partial transcription or replace an
+    existing destination.
+    """
+    if is_stdout:
+        if not atomic:
+            yield sys.stdout
+            return
+        buffer = io.StringIO()
+        try:
+            yield buffer
+            sys.stdout.write(buffer.getvalue())
+            sys.stdout.flush()
+        finally:
+            buffer.close()
+        return
+
+    if not atomic:
+        with output.open("w", encoding="utf-8") as sink:
+            yield sink
+        return
+
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=output.parent,
+            prefix=f".{output.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as sink:
+            temporary_path = Path(sink.name)
+            yield sink
+            sink.flush()
+            os.fsync(sink.fileno())
+        os.replace(temporary_path, output)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
 
 
 @app.command()
@@ -136,11 +191,27 @@ def transcribe(
             ),
         ),
     ] = None,
+    max_generation_tokens: Annotated[
+        int,
+        typer.Option(
+            "--max-generation-tokens",
+            min=1,
+            help=(
+                "Maximum tokens generated per 5-second chunk. Lower values cap "
+                "runaway decoding sooner; with --strict-eos, hitting the limit "
+                "fails the transcription."
+            ),
+        ),
+    ] = 2000,
     strict_eos: Annotated[
         bool,
         typer.Option(
             "--strict-eos",
-            help="Raise an error if a chunk fails to emit EOS within the generation budget (default: downgrade to a warning)",
+            help=(
+                "Raise an error if a chunk fails to emit EOS within the generation "
+                "budget (default: downgrade to a warning). JSONL output is staged "
+                "and published only after success in this mode."
+            ),
         ),
     ] = False,
     beam_size: Annotated[
@@ -258,6 +329,7 @@ def transcribe(
         no_eos_is_ok=not strict_eos,
         beam_size=beam_size,
         prelude_forcing=prelude_forcing,
+        max_generation_tokens=max_generation_tokens,
     )
 
     if format == OutputFormat.midi:
@@ -285,14 +357,13 @@ def transcribe(
             typer.echo(f"Saved auralization to {auralize}", err=True)
     elif format == OutputFormat.jsonl:
         # Stream one JSON object per line, flushing after each event so the
-        # file (or stdout pipe) can be consumed live.
-        if is_stdout:
-            sink = sys.stdout
-            close_after = False
-        else:
-            sink = output.open("w")
-            close_after = True
-        try:
+        # file (or stdout pipe) can be consumed live. Strict-EOS mode stages
+        # the stream instead so a late failure cannot publish partial output.
+        with _jsonl_output_sink(
+            output,
+            is_stdout=is_stdout,
+            atomic=strict_eos,
+        ) as sink:
             for e in model.transcribe(**kwargs):
                 if isinstance(e, ProgressEvent):
                     continue
@@ -300,16 +371,11 @@ def transcribe(
                 sink.flush()
                 if notes:
                     typer.echo(str(e), err=True)
-        finally:
-            if close_after:
-                sink.close()
         if not is_stdout:
             typer.echo(f"Saved JSONL to {output}", err=True)
     else:  # json
         events = [
-            e
-            for e in model.transcribe(**kwargs)
-            if not isinstance(e, ProgressEvent)
+            e for e in model.transcribe(**kwargs) if not isinstance(e, ProgressEvent)
         ]
         payload = json.dumps([_event_to_dict(e) for e in events], indent=2)
         if is_stdout:

@@ -8,6 +8,7 @@ generated.
 """
 
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 import torch
@@ -16,6 +17,72 @@ from muscriptor.events import ChunkBoundary, ProgressEvent
 from muscriptor.transcription_model import TranscriptionModel
 
 EOS = 99
+
+
+def test_transcribe_passes_public_generation_budget_to_token_stream(monkeypatch):
+    captured: dict[str, int] = {}
+
+    def generate_token_stream(*args):
+        captured["max_generation_tokens"] = args[3]
+        return iter(())
+
+    fake = SimpleNamespace(
+        _device=torch.device("cpu"),
+        _tokenizer=SimpleNamespace(_vocab=[], frame_rate=100),
+        _instrument_for_program=lambda _program: "piano",
+        _resolve_batch_size=lambda _batch_size, _prelude_forcing: 1,
+        _load_wav=lambda _audio, _sample_rate: torch.zeros(1, 80_000),
+        _build_conditions=lambda _chunk, _instrument_group: [object()],
+        _generate_token_stream=generate_token_stream,
+    )
+    monkeypatch.setattr(
+        "muscriptor.transcription_model.decode_model_tokens",
+        lambda stream, *_args, **_kwargs: stream,
+    )
+    monkeypatch.setattr("muscriptor.accelerator.synchronize", lambda: None)
+
+    events = list(
+        TranscriptionModel.transcribe(
+            fake,
+            "audio.wav",
+            max_generation_tokens=321,
+        )
+    )
+
+    assert events == [ProgressEvent(completed=0, total=1)]
+    assert captured["max_generation_tokens"] == 321
+
+
+@pytest.mark.parametrize("value", [0, -1, True])
+def test_transcribe_rejects_invalid_generation_budget(value):
+    fake = SimpleNamespace(_resolve_batch_size=Mock())
+
+    with pytest.raises(ValueError, match="positive integer"):
+        list(
+            TranscriptionModel.transcribe(
+                fake,
+                "audio.wav",
+                max_generation_tokens=value,
+            )
+        )
+
+    fake._resolve_batch_size.assert_not_called()
+
+
+def test_transcribe_to_midi_forwards_generation_budget():
+    fake = SimpleNamespace(
+        transcribe=Mock(return_value=iter(())),
+        events_to_midi_bytes=Mock(return_value=b"midi"),
+    )
+
+    result = TranscriptionModel.transcribe_to_midi(
+        fake,
+        "audio.wav",
+        max_generation_tokens=456,
+    )
+
+    assert result == b"midi"
+    assert fake.transcribe.call_args.kwargs["max_generation_tokens"] == 456
 
 
 def _run(batches, *, batch_size, seek_times, no_eos_is_ok=False):
