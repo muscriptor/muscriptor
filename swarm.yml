@@ -53,6 +53,8 @@ services:
     command: ["--port", "80"]
     environment:
       - HF_TOKEN=${HF_TOKEN:?HF_TOKEN must be set to pull the private weights}
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     volumes:
       - hf_cache:/root/.cache/huggingface
     deploy:
@@ -65,13 +67,13 @@ services:
         - "traefik.http.services.backend.loadbalancer.server.port=80"
         - "traefik.http.routers.backend.priority=10"
         - "prometheus-port=80"
-      replicas: 3
-      resources:
-        reservations:
-          generic_resources:
-            - discrete_resource_spec:
-                kind: 'gpu'
-                value: 1
+      replicas: 12
+      #resources:
+      #  reservations:
+      #    generic_resources:
+      #      - discrete_resource_spec:
+      #          kind: 'gpu'
+      #          value: 1
  
 networks:
   default:
