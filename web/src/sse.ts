@@ -11,12 +11,18 @@ export class TranscribeError extends Error {
   }
 }
 
-/** Stream SSE `data:` JSON payloads from a POST upload of `file`. */
+/** Stream SSE `data:` JSON payloads from a POST upload of `file`.
+ *
+ *  `clientId`, when given, is sent as the `X-Client-Id` header. The server uses
+ *  it to scope preemption: a new request only cancels an in-flight one that
+ *  carries the same id (a resubmit from this same tab). Two tabs send different
+ *  ids, so opening a second one no longer stops the first tab's transcription. */
 export async function* streamTranscribe(
   url: string,
   file: File,
   extra?: Record<string, string | string[]>,
   signal?: AbortSignal,
+  clientId?: string,
 ): AsyncGenerator<unknown> {
   const form = new FormData();
   form.append("file", file, file.name);
@@ -29,7 +35,9 @@ export async function* streamTranscribe(
       }
     }
   }
-  const resp = await fetch(url, { method: "POST", body: form, signal });
+  const headers: Record<string, string> = {};
+  if (clientId) headers["X-Client-Id"] = clientId;
+  const resp = await fetch(url, { method: "POST", body: form, signal, headers });
   if (!resp.ok || !resp.body) {
     // FastAPI's HTTPException bodies are `{"detail": "..."}`. Pull the detail
     // out (when present) so the UI can show why the upload was rejected
