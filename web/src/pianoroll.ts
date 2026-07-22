@@ -1,3 +1,5 @@
+import { INSTRUMENT_ORDER } from "./audio";
+
 export interface RollNote {
   pitch: number;
   start: number;
@@ -59,11 +61,14 @@ function isBlackKey(pitch: number): boolean {
 const GOLDEN_ANGLE = 137.508;
 
 /**
- * Color index per instrument, assigned in first-seen order and remembered for
- * the lifetime of the page. Persisting it keeps a given instrument on the same
- * color across transcriptions even as the set of instruments changes.
+ * Color index per instrument: its position in the canonical instrument list,
+ * so every instrument keeps the same color across tracks, uploads, and
+ * reloads. Names outside the list (e.g. "program_47") get the next free
+ * indices in first-seen order.
  */
-const instrumentIndex = new Map<string, number>();
+const instrumentIndex = new Map<string, number>(
+  INSTRUMENT_ORDER.map((name, i) => [name, i]),
+);
 
 export function instrumentColor(name: string): string {
   let idx = instrumentIndex.get(name);
