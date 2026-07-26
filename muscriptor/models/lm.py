@@ -257,7 +257,7 @@ class LMModel(nn.Module):
     # Generation
     # ------------------------------------------------------------------
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def generate(
         self,
         prompt: torch.Tensor | None = None,
