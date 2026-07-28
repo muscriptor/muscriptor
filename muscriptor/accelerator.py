@@ -53,7 +53,15 @@ def synchronize() -> None:
     No-op if no accelerator is available.
     """
     if _HAS_TORCH_ACCELERATOR:
-        torch.accelerator.synchronize()
+        # torch.accelerator.synchronize() still tries to init CUDA even on CPU-only systems
+        # Only call it if we actually have a non-CPU accelerator
+        try:
+            current_device = torch.accelerator.current_device_index()
+            if current_device >= 0:
+                torch.accelerator.synchronize()
+        except RuntimeError:
+            # No accelerator available (CUDA not found, etc.)
+            pass
         return
     if torch.cuda.is_available():
         torch.cuda.synchronize()
