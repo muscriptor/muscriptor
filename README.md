@@ -175,6 +175,7 @@ class TranscriptionModel:
             no_eos_is_ok: bool = True,
             beam_size: int = 1,
             prelude_forcing: bool = True,
+            max_generation_tokens: int = 2000,
         ) -> Generator[NoteStartEvent | NoteEndEvent | ProgressEvent, None, None]:
         """Transcribe audio into a stream of note events.
 
@@ -220,6 +221,10 @@ class TranscriptionModel:
                 generated strictly in order, so it only works with
                 batch_size=1 (the default); set prelude_forcing=False
                 explicitly to use larger batches.
+            max_generation_tokens: Maximum number of tokens generated for
+                each 5-second chunk. Lower values bound runaway decoding
+                sooner. A chunk that reaches this budget without EOS warns
+                when no_eos_is_ok=True and raises otherwise.
 
         Returns:
             Generator of NoteStartEvent, NoteEndEvent and ProgressEvent
@@ -244,6 +249,7 @@ class TranscriptionModel:
             no_eos_is_ok: bool = True,
             beam_size: int = 1,
             prelude_forcing: bool = True,
+            max_generation_tokens: int = 2000,
         ) -> bytes:
         """Same as `transcribe`, but returns a MIDI file as bytes instead
         of a generator of events. Useful when you want to save the MIDI
@@ -278,6 +284,12 @@ muscriptor transcribe audio.wav --format jsonl -o -
 # more accurate)
 muscriptor transcribe audio.wav --sampling -t 0.8
 muscriptor transcribe audio.wav --beam-size 4
+
+# Bound generation work per 5-second chunk. Strict EOS turns a chunk that
+# reaches the budget without EOS into an error instead of a warning. JSONL
+# output is staged and published only after success in this mode.
+muscriptor transcribe audio.wav --max-generation-tokens 512 --strict-eos \
+  --format jsonl -o events.jsonl
 
 # Notes sustained across a chunk boundary are teacher-forced into the next
 # chunk's prologue by default, so a chunk can't restart them with the wrong
