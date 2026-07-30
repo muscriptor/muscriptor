@@ -172,8 +172,22 @@ def _forbidden_tokens_used_by_transcribe(instruments, tokenizer):
         def _build_conditions(self, wav, instrument_group=None):
             return [SimpleNamespace()]
 
-        def _generate_token_stream(self, *args):
-            captured["forbidden_tokens"] = args[-1]
+        def _generate_token_stream(
+            self,
+            all_conditions,
+            seek_times,
+            batch_size,
+            max_gen_len,
+            use_sampling,
+            temperature,
+            cfg_coef,
+            no_eos_is_ok,
+            prelude_forcing,
+            beam_size,
+            forbidden_tokens,
+            *rest,
+        ):
+            captured["forbidden_tokens"] = forbidden_tokens
             return iter([])
 
     list(TranscriptionModel.transcribe(_Fake(), "unused.wav", instruments=instruments))

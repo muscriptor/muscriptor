@@ -237,16 +237,16 @@ def test_explicit_batch_size_1_keeps_forcing():
 # ---------------------------------------------------------------------------
 
 
-def _run_stream(scripts, tokenizer, *, seek_times, batch_size=1, prelude_forcing=True):
-    """Drive _generate_token_stream with a fake generate().
+def _fake_model(scripts, tokenizer, prompts):
+    """A stand-in with just the ``_model``/``_tokenizer``/``_device`` the token
+    stream touches, built as a real (un-``__init__``'d) TranscriptionModel so
+    the stream's helper methods resolve.
 
     ``scripts`` holds, per expected generate() call, the rows the fake emits
     *after* echoing back any prompt (mimicking the real generate contract,
-    which yields prompt tokens through the stream first). Each row is one
-    token per chunk in the batch. Returns (stream_items, prompts) where
-    ``prompts`` records the prompt passed to each call (as a list, or None).
+    which yields prompt tokens through the stream first). ``prompts`` is
+    appended to with the prompt each generate() call receives (list, or None).
     """
-    prompts: list[list[int] | None] = []
 
     def generate(prompt=None, **kwargs):
         prompts.append(None if prompt is None else prompt[0].tolist())
@@ -257,14 +257,32 @@ def _run_stream(scripts, tokenizer, *, seek_times, batch_size=1, prelude_forcing
         for row in scripts[len(prompts) - 1]:
             yield torch.tensor(row)
 
-    fake = SimpleNamespace(
-        _model=SimpleNamespace(generate=generate),
-        _tokenizer=tokenizer,
-        _device=torch.device("cpu"),
-    )
+    model = object.__new__(TranscriptionModel)
+    model._model = SimpleNamespace(generate=generate)
+    model._tokenizer = tokenizer
+    model._device = torch.device("cpu")
+    return model
+
+
+def _run_stream(
+    scripts,
+    tokenizer,
+    *,
+    seek_times,
+    batch_size=1,
+    prelude_forcing=True,
+    overlap=0.0,
+    allow_reset=False,
+):
+    """Drive _generate_token_stream with a fake generate().
+
+    Returns (stream_items, prompts) where ``prompts`` records the prompt passed
+    to each generate() call (as a list, or None).
+    """
+    prompts: list[list[int] | None] = []
+    model = _fake_model(scripts, tokenizer, prompts)
     stream = list(
-        TranscriptionModel._generate_token_stream(
-            fake,
+        model._generate_token_stream(
             [object()] * len(seek_times),
             seek_times,
             batch_size,
@@ -274,6 +292,8 @@ def _run_stream(scripts, tokenizer, *, seek_times, batch_size=1, prelude_forcing
             cfg_coef=1.0,
             no_eos_is_ok=True,
             prelude_forcing=prelude_forcing,
+            overlap=overlap,
+            allow_reset=allow_reset,
         )
     )
     return stream, prompts

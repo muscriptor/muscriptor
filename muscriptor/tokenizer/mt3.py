@@ -10,6 +10,7 @@ from collections.abc import Iterable
 from muscriptor.tokenizer.notes import (
     DRUM_PROGRAM,
     SPECIAL_TOKENS,
+    NoteEvent,
     build_event_vocab,
 )
 
@@ -251,6 +252,78 @@ class MT3Tokenizer:
                 program_state = program
             tokens.append(self._token_index[("pitch", pitch)])
         tokens.append(self._token_index[("tie", 0)])
+        return tokens
+
+    def overlap_prompt_token_ids(
+        self,
+        open_note_keys: Iterable[tuple[int, int]],
+        note_events: Iterable[NoteEvent],
+        seek_time: float,
+    ) -> list[int]:
+        """Encode a teacher-forcing prompt for the start of an overlapping chunk.
+
+        Generalizes :meth:`tie_section_token_ids`: the prompt is a tie prologue
+        (``open_note_keys`` — the notes sounding at ``seek_time``) followed by
+        the ``tie`` token and then the ``note_events`` the previous chunk
+        predicted inside the overlap window ``[seek_time, seek_time+overlap)``,
+        encoded relative to ``seek_time`` exactly as the training encoder
+        (``note_event2event``) would. Replaying those events pins the model to
+        the previous chunk's decisions over the overlap, so it continues from
+        them with genuine left-context instead of re-deciding blind.
+
+        With an empty ``note_events`` this reduces to
+        ``tie_section_token_ids(open_note_keys)`` (the ``overlap == 0`` case);
+        the returned prompt never carries a trailing EOS, so generation
+        continues from it.
+        """
+        idx = self._token_index
+        tokens: list[int] = []
+        program_state: int | None = None
+        for program, pitch in sorted(open_note_keys):
+            if program != program_state:
+                tokens.append(idx[("program", program)])
+                program_state = program
+            tokens.append(idx[("pitch", pitch)])
+        tokens.append(idx[("tie", 0)])
+
+        start_tick = round(seek_time * self.frame_rate)
+        tick_state = start_tick
+        velocity_state: int | None = None
+        ordered = sorted(
+            note_events,
+            key=lambda n: (
+                round(n.time * self.frame_rate),
+                n.is_drum,
+                n.program,
+                n.velocity,
+                n.pitch,
+            ),
+        )
+        for ne in ordered:
+            if ne.is_drum and ne.velocity == 0:
+                continue
+            ne_tick = round(ne.time * self.frame_rate)
+            if ne_tick > tick_state:
+                tokens.append(idx[("shift", ne_tick - start_tick)])
+                tick_state = ne_tick
+            elif ne_tick < tick_state:
+                # Events are sorted by tick; a smaller tick can only appear when
+                # rounding collides — treat it as simultaneous rather than error.
+                pass
+
+            if ne.is_drum and ne.velocity == 1:
+                if velocity_state != 1:
+                    tokens.append(idx[("velocity", 1)])
+                    velocity_state = 1
+                tokens.append(idx[("drum", ne.pitch)])
+            else:
+                if ne.program != program_state:
+                    tokens.append(idx[("program", ne.program)])
+                    program_state = ne.program
+                if ne.velocity != velocity_state:
+                    tokens.append(idx[("velocity", ne.velocity)])
+                    velocity_state = ne.velocity
+                tokens.append(idx[("pitch", ne.pitch)])
         return tokens
 
     def forbidden_token_ids(self, instruments: Iterable[str]) -> list[int]:

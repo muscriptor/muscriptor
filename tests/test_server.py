@@ -235,6 +235,57 @@ def test_transcribe_passes_instruments(tmp_path):
     assert model.transcribe.call_args.kwargs["instruments"] == ["violin", "drums"]
 
 
+def test_transcribe_overlap_defaults_off(tmp_path):
+    model = make_model()
+    client = TestClient(create_app(model))
+    resp = client.post(
+        "/transcribe",
+        files={"file": ("silent.wav", _wav_bytes(tmp_path), "audio/wav")},
+    )
+    assert resp.status_code == 200
+    kwargs = model.transcribe.call_args.kwargs
+    assert kwargs["overlap"] == 0.0
+    assert kwargs["allow_reset"] is False
+
+
+def test_transcribe_forwards_overlap_and_reset(tmp_path):
+    model = make_model()
+    client = TestClient(create_app(model))
+    resp = client.post(
+        "/transcribe",
+        files={"file": ("silent.wav", _wav_bytes(tmp_path), "audio/wav")},
+        data={"overlap": "2.5", "allow_reset": "true"},
+    )
+    assert resp.status_code == 200
+    kwargs = model.transcribe.call_args.kwargs
+    assert kwargs["overlap"] == 2.5
+    assert kwargs["allow_reset"] is True
+
+
+def test_transcribe_rejects_out_of_range_overlap(tmp_path):
+    client = TestClient(create_app(make_model()), raise_server_exceptions=False)
+    resp = client.post(
+        "/transcribe",
+        files={"file": ("silent.wav", _wav_bytes(tmp_path), "audio/wav")},
+        data={"overlap": "5.0"},
+    )
+    assert resp.status_code == 400
+
+
+def test_transcribe_midi_forwards_overlap_and_reset(tmp_path):
+    model = make_model()
+    client = TestClient(create_app(model))
+    resp = client.post(
+        "/transcribe/midi",
+        files={"file": ("silent.wav", _wav_bytes(tmp_path), "audio/wav")},
+        data={"overlap": "2.5", "allow_reset": "true"},
+    )
+    assert resp.status_code == 200
+    kwargs = model.transcribe_to_midi.call_args.kwargs
+    assert kwargs["overlap"] == 2.5
+    assert kwargs["allow_reset"] is True
+
+
 def test_transcribe_midi_returns_bytes_with_headers(tmp_path):
     model = make_model()
     client = TestClient(create_app(model))

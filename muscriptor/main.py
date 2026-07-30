@@ -162,6 +162,32 @@ def transcribe(
             ),
         ),
     ] = True,
+    overlap: Annotated[
+        float,
+        typer.Option(
+            "--overlap",
+            help=(
+                "Seconds of overlap between successive 5-second windows "
+                "(default: 0). With overlap, each chunk is teacher-forced to "
+                "replay the previous chunk's predictions over the shared "
+                "region, so notes crossing a boundary keep real left-context. "
+                "Requires prelude forcing; must be < 5."
+            ),
+        ),
+    ] = 0.0,
+    allow_reset: Annotated[
+        bool,
+        typer.Option(
+            "--allow-reset",
+            help=(
+                "Enable the gzip restart criterion (only with --overlap > 0): "
+                "generate each overlapping chunk twice — with and without the "
+                "overlap prompt — and keep the un-prompted one when the prompted "
+                "one collapses into degenerate/repetitive output. Doubles "
+                "generation on overlapping chunks."
+            ),
+        ),
+    ] = False,
     auralize: Annotated[
         Path | None,
         typer.Option(
@@ -225,6 +251,29 @@ def transcribe(
         )
         raise typer.Exit(1)
 
+    if not 0.0 <= overlap < 5.0:
+        typer.echo(
+            f"Error: --overlap {overlap} must be in [0, 5): it is the seconds "
+            "two 5-second windows share, so it cannot reach the window length.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    if overlap > 0 and not prelude_forcing:
+        typer.echo(
+            "Error: --overlap teacher-forces each chunk from the previous one, "
+            "so it requires prelude forcing (drop --no-prelude-forcing).",
+            err=True,
+        )
+        raise typer.Exit(1)
+
+    if allow_reset and overlap == 0:
+        typer.echo(
+            "Warning: --allow-reset has no effect without --overlap > 0; the "
+            "gzip restart criterion only kicks in for overlapping chunks.",
+            err=True,
+        )
+
     is_stdout = output is not None and str(output) == "-"
 
     if output is None:
@@ -258,6 +307,8 @@ def transcribe(
         no_eos_is_ok=not strict_eos,
         beam_size=beam_size,
         prelude_forcing=prelude_forcing,
+        overlap=overlap,
+        allow_reset=allow_reset,
     )
 
     if format == OutputFormat.midi:

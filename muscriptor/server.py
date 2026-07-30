@@ -11,6 +11,13 @@ POST /transcribe/midi takes the same upload but blocks until transcription
 completes and returns the raw `audio/midi` bytes directly (no SSE, no
 base64), with a `Content-Disposition: attachment` header. Audio longer than
 15 minutes is rejected with 413.
+
+Both endpoints accept optional `overlap` (float seconds, default 0) and
+`allow_reset` (bool, default false) form fields, forwarded to
+`TranscriptionModel.transcribe`: overlapping windows + the gzip restart
+criterion. They are off by default and have no UI yet; `allow_reset` buffers
+each overlapping chunk (its notes arrive a whole chunk at a time rather than
+token-by-token).
 """
 
 import asyncio
@@ -179,6 +186,14 @@ def create_app(model: TranscriptionModel, web_dir: str | Path | None = None) -> 
     async def transcribe(
         file: Annotated[UploadFile, File()],
         instruments: Annotated[list[str], Form(default_factory=list)],
+        # Overlapping-window transcription + gzip restart criterion. Off by
+        # default (adjacent windows, live per-token streaming); there is no UI
+        # for it yet, but the capability is wired so a future "higher quality"
+        # toggle only has to send these fields (e.g. overlap=2.5, allow_reset=
+        # true). allow_reset regenerates each overlapping chunk twice and can't
+        # stream tokens live, so its notes surface a whole chunk at a time.
+        overlap: Annotated[float, Form()] = 0.0,
+        allow_reset: Annotated[bool, Form()] = False,
         x_client_id: Annotated[str | None, Header()] = None,
     ) -> StreamingResponse:
         data = await file.read()
@@ -206,6 +221,14 @@ def create_app(model: TranscriptionModel, web_dir: str | Path | None = None) -> 
                 detail=f"unknown instrument name(s): {', '.join(unknown)}",
             )
 
+        # Validate up front so a bad value fails as a clean 400 instead of a
+        # ValueError raised on the first iteration of the streaming generator.
+        if not 0.0 <= overlap < 5.0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"overlap must be in [0, 5), got {overlap}",
+            )
+
         # Acquire the single-transcription lock, preempting only a resubmit from
         # this same client (see acquire_transcribe_lock). `release_lock` runs
         # from whichever cleanup path fires first: the generator's finally
@@ -229,6 +252,8 @@ def create_app(model: TranscriptionModel, web_dir: str | Path | None = None) -> 
                     instruments=instruments or None,
                     batch_size=1,
                     no_eos_is_ok=True,
+                    overlap=overlap,
+                    allow_reset=allow_reset,
                 ):
                     # A newer request preempted this run — stop generating
                     # (closing the model.transcribe generator) and release the
@@ -273,6 +298,8 @@ def create_app(model: TranscriptionModel, web_dir: str | Path | None = None) -> 
     async def transcribe_midi(
         file: Annotated[UploadFile, File()],
         instruments: Annotated[list[str], Form(default_factory=list)],
+        overlap: Annotated[float, Form()] = 0.0,
+        allow_reset: Annotated[bool, Form()] = False,
         x_client_id: Annotated[str | None, Header()] = None,
     ) -> Response:
         """Transcribe an audio file and return the .mid file directly.
@@ -311,6 +338,12 @@ def create_app(model: TranscriptionModel, web_dir: str | Path | None = None) -> 
                 detail=f"unknown instrument name(s): {', '.join(unknown)}",
             )
 
+        if not 0.0 <= overlap < 5.0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"overlap must be in [0, 5), got {overlap}",
+            )
+
         # Same mutual exclusion as /transcribe, via the shared helper. This run
         # is not cancellable (it doesn't stream, so there's nothing to stop
         # mid-flight); cancellable=False records that, so nothing tries to
@@ -325,6 +358,8 @@ def create_app(model: TranscriptionModel, web_dir: str | Path | None = None) -> 
                 model.transcribe_to_midi,
                 (wav, sr),
                 instruments=instruments or None,
+                overlap=overlap,
+                allow_reset=allow_reset,
             )
         finally:
             release_lock()

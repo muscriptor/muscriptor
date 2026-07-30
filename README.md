@@ -175,6 +175,8 @@ class TranscriptionModel:
             no_eos_is_ok: bool = True,
             beam_size: int = 1,
             prelude_forcing: bool = True,
+            overlap: float = 0.0,
+            allow_reset: bool = False,
         ) -> Generator[NoteStartEvent | NoteEndEvent | ProgressEvent, None, None]:
         """Transcribe audio into a stream of note events.
 
@@ -220,6 +222,19 @@ class TranscriptionModel:
                 generated strictly in order, so it only works with
                 batch_size=1 (the default); set prelude_forcing=False
                 explicitly to use larger batches.
+            overlap: Seconds of overlap between successive 5-second windows
+                (default 0; stride is `5 - overlap`). It generalizes prelude
+                forcing: instead of forcing only the tie prologue, each chunk
+                after the first replays the whole note-event sequence the
+                previous chunk predicted over the shared window, so notes
+                crossing a boundary continue with real left-context. Requires
+                prelude_forcing (hence batch_size=1) and `0 <= overlap < 5`.
+            allow_reset: Only effective with overlap > 0. Generates each
+                overlapping chunk twice — with and without the overlap prompt —
+                and keeps the un-prompted continuation whenever the prompted one
+                collapses into degenerate/repetitive output (a gzip-ratio
+                restart criterion). It runs two generations per chunk and cannot
+                stream tokens live, so it is an offline/CLI option.
 
         Returns:
             Generator of NoteStartEvent, NoteEndEvent and ProgressEvent
@@ -244,6 +259,8 @@ class TranscriptionModel:
             no_eos_is_ok: bool = True,
             beam_size: int = 1,
             prelude_forcing: bool = True,
+            overlap: float = 0.0,
+            allow_reset: bool = False,
         ) -> bytes:
         """Same as `transcribe`, but returns a MIDI file as bytes instead
         of a generator of events. Useful when you want to save the MIDI
@@ -285,6 +302,14 @@ muscriptor transcribe audio.wav --beam-size 4
 # defaults to 1; batching (faster on GPU, lower quality at chunk boundaries)
 # must be opted into explicitly:
 muscriptor transcribe audio.wav --no-prelude-forcing --batch-size 4
+
+# Overlapping windows: successive 5s chunks share `--overlap` seconds, and each
+# chunk replays the previous one's predictions over the shared region so notes
+# crossing a boundary keep real left-context. `--allow-reset` adds a gzip
+# restart criterion — regenerate an overlapping chunk without the overlap prompt
+# whenever the prompted one collapses into a degenerate/repetitive loop.
+muscriptor transcribe audio.wav --overlap 2.5
+muscriptor transcribe audio.wav --overlap 2.5 --allow-reset
 
 # Render a stereo check-mix of the result (left channel = original audio,
 # right channel = synthesized MIDI; requires fluidsynth on PATH)
