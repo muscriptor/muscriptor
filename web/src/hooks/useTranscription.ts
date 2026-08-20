@@ -25,6 +25,9 @@ type EndEvent = {
 type TranscriptionCompleteEvent = {
   type: "transcription_complete";
   data: string; // base64-encoded .mid file
+  // The same notes snapped to the beat grid, for engraving; null when there was
+  // no grid to snap them to.
+  quantized_midi: string | null;
   beat_grid: BeatGrid | null; // null when no constant tempo was detected
 };
 type ProgressMsg = {
@@ -77,6 +80,9 @@ export interface TranscriptionDeps {
   setMidiUrl: (url: string | null) => void;
   /** Raw MIDI blob, re-uploaded to /auralize for the mix download. */
   setMidiBlob: (blob: Blob | null) => void;
+  /** The grid-snapped MIDI, uploaded to /sheets for the engraving; null when the
+   *  transcription had no grid to snap to. */
+  setQuantizedMidiBlob: (blob: Blob | null) => void;
   /** Source audio file, re-uploaded to /auralize alongside the MIDI. */
   setCurrentFile: (file: File | null) => void;
   setUserScrolled: (v: boolean) => void;
@@ -103,6 +109,7 @@ export function useTranscription(deps: TranscriptionDeps) {
     setInstruments,
     setMidiUrl,
     setMidiBlob,
+    setQuantizedMidiBlob,
     setCurrentFile,
     setUserScrolled,
     midiFilenameRef,
@@ -140,11 +147,16 @@ export function useTranscription(deps: TranscriptionDeps) {
     }
     setMidiUrl(null);
     setMidiBlob(null);
+    setQuantizedMidiBlob(null);
+  }
+
+  function midiBlobOf(base64: string): Blob {
+    const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+    return new Blob([bytes], { type: "audio/midi" });
   }
 
   function setMidi(base64: string) {
-    const bytes = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
-    const blob = new Blob([bytes], { type: "audio/midi" });
+    const blob = midiBlobOf(base64);
     if (midiUrlRef.current !== null) URL.revokeObjectURL(midiUrlRef.current);
     const url = URL.createObjectURL(blob);
     midiUrlRef.current = url;
@@ -244,6 +256,7 @@ export function useTranscription(deps: TranscriptionDeps) {
         if (ev.type === "transcription_complete") {
           // Final event: the assembled MIDI file. Enables the download button.
           setMidi(ev.data);
+          setQuantizedMidiBlob(ev.quantized_midi ? midiBlobOf(ev.quantized_midi) : null);
           // Tempo came with it — redraw the time grid as bars instead of seconds,
           // and move the notes onto the beats (the MIDI above already has them
           // there), in the roll and in the scheduled playback alike.

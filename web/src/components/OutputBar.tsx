@@ -35,6 +35,8 @@ export function OutputBar(props: {
   midiFilename: string;
   /** Raw MIDI blob + source audio, re-uploaded to /auralize for the mix. */
   midiBlob: Blob | null;
+  /** The grid-snapped MIDI, engraved by /sheets when the server sent one. */
+  quantizedMidiBlob: Blob | null;
   currentFile: File | null;
   onTranscribeAnother: () => void;
 }) {
@@ -45,6 +47,7 @@ export function OutputBar(props: {
     midiUrl,
     midiFilename,
     midiBlob,
+    quantizedMidiBlob,
     currentFile,
     onTranscribeAnother,
   } = props;
@@ -145,7 +148,11 @@ export function OutputBar(props: {
     setBusy("Generating…");
     try {
       const form = new FormData();
-      form.append("midi", midiBlob, "transcription.mid");
+      // Engrave the grid-snapped notes when the server managed to snap them:
+      // notation made from raw transcription can have spurious 128th notes etc.
+      const engrave = quantizedMidiBlob ?? midiBlob;
+      form.append("midi", engrave, "transcription.mid");
+      form.append("quantized", String(quantizedMidiBlob !== null));
       const resp = await fetch("/sheets", { method: "POST", body: form });
       if (!resp.ok) throw new Error(await errorDetail(resp));
       const zipBlob = await resp.blob();
@@ -296,6 +303,7 @@ export function OutputBar(props: {
           files={sheets.files}
           zipBlob={sheets.zipBlob}
           zipFilename={sheets.zipFilename}
+          quantized={quantizedMidiBlob !== null}
           onClose={() => setSheetsOpen(false)}
         />
       )}

@@ -1,5 +1,7 @@
 """Tests for muscriptor/utils/midi.py."""
 
+import dataclasses
+
 import numpy as np
 import pytest
 from mido import MidiFile
@@ -172,3 +174,99 @@ def test_bar_offset_marker_is_machine_readable():
     text = _metas(midi, "marker")[0].text
     assert text.startswith(BAR_OFFSET_MARKER)
     assert read_bar_offset(midi) > 0
+
+
+# --- quantization -----------------------------------------------------------
+
+
+def _sixteenth(bpm: float = 120.0) -> float:
+    return 60.0 / bpm / 4
+
+
+def _jittered(times, jitter: float = 0.008, duration: float = 0.1) -> list[Note]:
+    """One note per time, each pushed off it by an alternating `jitter`."""
+    return [
+        Note(
+            is_drum=False,
+            program=0,
+            onset=t + (-1) ** i * jitter,
+            offset=t + duration,
+            pitch=60 + i % 12,
+        )
+        for i, t in enumerate(times)
+    ]
+
+
+def _quantizing_grid(bpm: float = 120.0, subdivision: int = 4) -> BeatGrid:
+    """A grid as detection leaves it: delay and subdivision both measured."""
+    return BeatGrid(
+        bpm=bpm,
+        beats_per_bar=4,
+        first_downbeat=0.0,
+        onset_delay=0.0,
+        beat_subdivision=subdivision,
+    )
+
+
+def _off_grid(time: float, step: float) -> float:
+    """How far `time` is from the nearest multiple of `step`, in seconds."""
+    return abs(time / step - round(time / step)) * step
+
+
+def _note_times(midi) -> list[float]:
+    """Onset seconds of every note in the file, in order."""
+    times, time = [], 0.0
+    for msg in midi:
+        time += msg.time
+        if msg.type == "note_on" and msg.velocity:
+            times.append(time)
+    return sorted(times)
+
+
+def test_quantize_snaps_the_jitter_out():
+    step = _sixteenth()
+    grid = _quantizing_grid()
+    notes = _jittered([i * step for i in range(64)])
+    midi = notes_to_midi(notes, beat_grid=grid, quantize=True)
+    offset = grid.bar_offset()
+    for time in _note_times(midi):
+        assert _off_grid(time - offset, step) < 0.002
+
+
+def test_quantize_snaps_onto_a_triplet_grid():
+    """Triplet eighths are a grid of their own; snapping them to 1/16 would ruin them."""
+    grid = _quantizing_grid(subdivision=3)
+    third = 60.0 / grid.bpm / 3
+    notes = _jittered([i * third for i in range(64)], jitter=0.005)
+    midi = notes_to_midi(notes, beat_grid=grid, quantize=True)
+    for time in _note_times(midi):
+        assert _off_grid(time - grid.bar_offset(), third) < 0.002
+
+
+def test_quantize_keeps_notes_too_short_to_survive_rounding():
+    """A hit shorter than half a grid step would otherwise round away to nothing."""
+    step = _sixteenth()
+    notes = _jittered([i * step for i in range(64)], jitter=0.0, duration=step / 10)
+    midi = notes_to_midi(notes, beat_grid=_quantizing_grid(), quantize=True)
+    assert len(_note_times(midi)) == 64
+
+
+def test_no_measured_subdivision_is_nothing_to_snap_to():
+    """A placeholder tempo, mostly: the notes are written as they came in."""
+    notes = _jittered([i * _sixteenth() for i in range(64)])
+    grid = dataclasses.replace(_quantizing_grid(), beat_subdivision=None)
+    assert _note_times(
+        notes_to_midi(notes, beat_grid=grid, quantize=True)
+    ) == _note_times(notes_to_midi(notes, beat_grid=grid))
+
+
+def test_the_grid_carries_the_subdivision_it_measured():
+    """`quantize` snaps to this, so detection has to leave it on the grid."""
+    beats = np.arange(64) * (60.0 / 120.0)
+    grid = BeatGrid(bpm=120.0, beats_per_bar=4, first_downbeat=0.0, beats=beats)
+    eighths = [
+        Note(is_drum=False, program=0, onset=t, offset=t + 0.1, pitch=60)
+        for t in np.arange(0, 30, 0.25) + 0.01
+    ]
+    measured = grid.with_onset_delay([n.onset for n in eighths])
+    assert measured.beat_subdivision == 2

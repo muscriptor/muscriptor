@@ -34,7 +34,7 @@ ONSET_SUBDIVISIONS = (1, 2, 3, 4, 6, 8, 12, 16, 24)
 # are above 0.5
 MIN_ONSET_CONCENTRATION = 0.5
 
-# |R| for n random angles is about 1/sqrt(n). With MIN_ONSETS = 40 the chance of 
+# |R| for n random angles is about 1/sqrt(n). With MIN_ONSETS = 40 the chance of
 # passing the bar with a random distribution is about 1 in 5,000.
 MIN_ONSETS = 40
 
@@ -93,6 +93,8 @@ class BeatGrid:
     # until some notes have been measured against the grid (see `with_onset_delay`).
     # Whoever writes the notes out subtracts it from them.
     onset_delay: float | None = None
+    # Subdivisions of the beat to use for quantizing the onsets.
+    beat_subdivision: int | None = None
 
     @property
     def bar_seconds(self) -> float | None:
@@ -138,7 +140,7 @@ class BeatGrid:
         if self.beats is not None:
             measured = estimate_onset_delay(onsets, self)
         if measured is None:
-            return dataclasses.replace(self, onset_delay=0.0)
+            return dataclasses.replace(self, onset_delay=0.0, beat_subdivision=None)
         logger.info(
             "onsets sit %+.1f ms off a 1/%d-beat grid (|R| = %.2f over %d "
             "onsets); moving the notes back by that much",
@@ -147,7 +149,9 @@ class BeatGrid:
             measured.concentration,
             measured.n_onsets,
         )
-        return dataclasses.replace(self, onset_delay=measured.seconds)
+        return dataclasses.replace(
+            self, onset_delay=measured.seconds, beat_subdivision=measured.subdivision
+        )
 
 
 @dataclasses.dataclass(frozen=True)

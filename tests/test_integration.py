@@ -164,22 +164,26 @@ def test_transcribe_note_fields_in_range(transcription_model, noise):
 
 
 # ---------------------------------------------------------------------------
-# transcribe_to_midi
+# transcribe_and_postprocess
 # ---------------------------------------------------------------------------
 
 
-def test_transcribe_to_midi_returns_bytes(transcription_model, silence):
-    midi_bytes = transcription_model.transcribe_to_midi((silence, _SAMPLE_RATE))
+def test_transcribe_and_postprocess_returns_bytes(transcription_model, silence):
+    midi_bytes, _ = transcription_model.transcribe_and_postprocess(
+        (silence, _SAMPLE_RATE)
+    )
     assert isinstance(midi_bytes, bytes)
     assert len(midi_bytes) > 0
 
 
-def test_transcribe_to_midi_is_valid(transcription_model, silence):
+def test_transcribe_and_postprocess_is_valid(transcription_model, silence):
     from mido import MidiFile
 
     with tempfile.TemporaryDirectory() as tmpdir:
         out = Path(tmpdir) / "out.mid"
-        out.write_bytes(transcription_model.transcribe_to_midi((silence, _SAMPLE_RATE)))
+        out.write_bytes(
+            transcription_model.transcribe_and_postprocess((silence, _SAMPLE_RATE))[0]
+        )
         midi = MidiFile(str(out))
         assert len(midi.tracks) > 0
 
@@ -310,7 +314,7 @@ def test_transcribe_song_to_midi(transcription_model, song_clip):
     with tempfile.TemporaryDirectory() as tmpdir:
         out = Path(tmpdir) / "filling_the_void_10s.mid"
         out.write_bytes(
-            transcription_model.transcribe_to_midi((song_clip, _SAMPLE_RATE))
+            transcription_model.transcribe_and_postprocess((song_clip, _SAMPLE_RATE))
         )
         assert out.exists()
         midi = MidiFile(str(out))

@@ -78,6 +78,9 @@ export function App() {
   const [instruments, setInstruments] = useState<string[]>([]);
   const [midiUrl, setMidiUrl] = useState<string | null>(null);
   const [midiBlob, setMidiBlob] = useState<Blob | null>(null);
+  // The grid-snapped MIDI the sheet music is engraved from; null when the
+  // transcription had no beat grid to snap to.
+  const [quantizedMidiBlob, setQuantizedMidiBlob] = useState<Blob | null>(null);
   const [currentFile, setCurrentFile] = useState<File | null>(null);
   const [mix, setMix] = useState(0.75);
   const [stereo, setStereo] = useState(false);
@@ -120,6 +123,7 @@ export function App() {
     setInstruments,
     setMidiUrl,
     setMidiBlob,
+    setQuantizedMidiBlob,
     setCurrentFile,
     setUserScrolled,
     midiFilenameRef,
@@ -173,6 +177,7 @@ export function App() {
     setInstruments([]);
     setMidiUrl(null);
     setMidiBlob(null);
+    setQuantizedMidiBlob(null);
     setUserScrolled(false);
     setAppState("idle");
     setSubmit({ phase: "idle" });
@@ -450,6 +455,7 @@ export function App() {
             midiUrl={midiUrl}
             midiFilename={midiFilenameRef.current}
             midiBlob={midiBlob}
+            quantizedMidiBlob={quantizedMidiBlob}
             currentFile={currentFile}
             onTranscribeAnother={transcribeAnother}
           />
