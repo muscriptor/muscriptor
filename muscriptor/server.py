@@ -16,7 +16,8 @@ completes and returns the raw `audio/midi` bytes directly (no SSE, no
 base64), with a `Content-Disposition: attachment` header. Audio longer than
 15 minutes is rejected with 413.
 
-POST /sheets takes a MIDI upload instead of audio and returns every file
+POST /sheets takes a MIDI upload instead of audio (the `quantized_midi` from
+/transcribe, with `quantized=true`) and returns every file
 `muscriptor.utils.sheets.write_sheets` engraves from it — MusicXML, the full
 score, one PDF per instrument — as a single uncompressed zip. It needs
 MuseScore 4+ on the server, and answers 503 when there is none.
@@ -81,7 +82,7 @@ _MAX_TRANSCRIBE_MIDI_DURATION_S = 15 * 60
 SHEETS_ZIP_NAME = "sheets.zip"
 
 
-def engrave_to_zip(midi_bytes: bytes) -> bytes:
+def engrave_to_zip(midi_bytes: bytes, quantized: bool = False) -> bytes:
     """Engrave `midi_bytes` and pack everything written into one zip.
 
     Runs `write_sheets` into a scratch directory that is thrown away once the
@@ -94,7 +95,7 @@ def engrave_to_zip(midi_bytes: bytes) -> bytes:
     carry compression of their own.
     """
     with tempfile.TemporaryDirectory(prefix="muscriptor-sheets-") as tmp:
-        written = write_sheets(midi_bytes, Path(tmp))
+        written = write_sheets(midi_bytes, Path(tmp), quantized=quantized)
         buf = io.BytesIO()
         with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_STORED) as archive:
             for path in written:
@@ -312,12 +313,26 @@ def create_app(model: TranscriptionModel, web_dir: str | Path | None = None) -> 
                     )
                 midi_bytes = model.events_to_midi_bytes(iter(events), beat_grid=grid)
                 midi_b64 = base64.b64encode(midi_bytes).decode("ascii")
+                # A second copy with the notes snapped to the beat grid. Useful for
+                # writing sheet music where we want "idealized" timing
+                quantized_midi = (
+                    model.events_to_midi_bytes(
+                        iter(events), beat_grid=grid, quantize=True
+                    )
+                    if grid is not None and grid.beat_subdivision is not None
+                    else None
+                )
                 # The grid rides along so the UI can draw bar lines instead of a
                 # fixed seconds grid; null when no tempo was detected.
                 payload = json.dumps(
                     {
                         "type": "transcription_complete",
                         "data": midi_b64,
+                        "quantized_midi": base64.b64encode(quantized_midi).decode(
+                            "ascii"
+                        )
+                        if quantized_midi
+                        else None,
                         # Only the fields the UI draws with; `grid.beats` is an
                         # ndarray and not JSON-serializable anyway.
                         "beat_grid": {
@@ -398,8 +413,8 @@ def create_app(model: TranscriptionModel, web_dir: str | Path | None = None) -> 
             x_client_id, cancellable=False
         )
         try:
-            midi_bytes = await asyncio.to_thread(
-                model.transcribe_to_midi,
+            midi_bytes, _ = await asyncio.to_thread(
+                model.transcribe_and_postprocess,
                 (wav, sr),
                 instruments=instruments or None,
                 detect_tempo=detect_tempo,
@@ -478,18 +493,26 @@ def create_app(model: TranscriptionModel, web_dir: str | Path | None = None) -> 
         return Response(content=wav_bytes, media_type="audio/wav")
 
     @app.post("/sheets")
-    async def sheets(midi: Annotated[UploadFile, File()]) -> Response:
+    async def sheets(
+        midi: Annotated[UploadFile, File()],
+        quantized: Annotated[bool, Form()] = False,
+    ) -> Response:
         """Engrave a MIDI file as sheet music, returned as one zip.
 
         The whole set is rendered in one go — MuseScore is slow enough that a
         round trip per file would be worse — so the caller gets every PDF, the
         MusicXML and the MIDI in a single uncompressed archive and picks from it
         locally. Requires MuseScore 4+ on the server (503 without it).
+
+        `quantized` says the upload is already snapped to a beat grid — the
+        `quantized_midi` from /transcribe — which is what the notation should be
+        engraved from. Without it the engraving keeps the timing jitter, so this
+        does not quantize anything itself.
         """
         midi_bytes = await midi.read()
 
         try:
-            zip_bytes = await asyncio.to_thread(engrave_to_zip, midi_bytes)
+            zip_bytes = await asyncio.to_thread(engrave_to_zip, midi_bytes, quantized)
         except MuseScoreNotFoundError as e:
             # A deployment problem, not a bad request: the same 503 the UI
             # already knows how to report, with the install hint as its detail.

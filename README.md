@@ -93,7 +93,7 @@ The output structure looks like this:
 
 ```
 score/
-├── score.mid                       the transcription, as MIDI
+├── score.mid                       the transcription, as quantized MIDI
 ├── score.musicxml                  the engraved score, as MusicXML
 ├── full_score.pdf                  every instrument on one system
 ├── 01_electric_guitar.pdf          one PDF per instrument …
@@ -106,6 +106,10 @@ score/
 This needs **MuseScore 4 or newer** installed separately. Downloads for every
 platform are at [musescore.org/en/download](https://musescore.org/en/download).
 Set `$MUSCRIPTOR_MUSESCORE` if it lives somewhere unusual.
+
+It works best if there is a steady tempo (i.e. playing with a metronome), because
+that allows us to quantize the notes (snap them to a grid) for a cleaner transcription.
+Rubato recordings will work significantly worse.
 
 ## Using from Python
 

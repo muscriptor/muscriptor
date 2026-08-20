@@ -3,6 +3,7 @@ import clsx from "clsx";
 import { unzipSync } from "fflate";
 import { Button } from "./Button";
 import { SheetsDialog, type SheetFile } from "./SheetsDialog";
+import type { TranscriptionResult } from "../hooks/useTranscription";
 import { IconChevron, IconDownload } from "./icons";
 import { track } from "../analytics";
 
@@ -31,10 +32,9 @@ export function OutputBar(props: {
   transcribing: boolean;
   progressFillRef: RefObject<HTMLDivElement | null>;
   progressLabelRef: RefObject<HTMLSpanElement | null>;
-  midiUrl: string | null;
-  midiFilename: string;
-  /** Raw MIDI blob + source audio, re-uploaded to /auralize for the mix. */
-  midiBlob: Blob | null;
+  /** The finished transcription's exports, or null while there is none. */
+  result: TranscriptionResult | null;
+  /** Source audio, re-uploaded to /auralize alongside the MIDI for the mix. */
   currentFile: File | null;
   onTranscribeAnother: () => void;
 }) {
@@ -42,9 +42,7 @@ export function OutputBar(props: {
     transcribing,
     progressFillRef,
     progressLabelRef,
-    midiUrl,
-    midiFilename,
-    midiBlob,
+    result,
     currentFile,
     onTranscribeAnother,
   } = props;
@@ -63,7 +61,7 @@ export function OutputBar(props: {
   } | null>(null);
   const [sheetsOpen, setSheetsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-  const ready = midiUrl !== null;
+  const ready = result !== null;
 
   // Dismiss the download menu on outside click / Escape.
   useEffect(() => {
@@ -83,11 +81,11 @@ export function OutputBar(props: {
   }, [menuOpen]);
 
   function download() {
-    if (midiUrl === null) return;
+    if (result === null) return;
     track("download", { format: "midi" });
     const a = document.createElement("a");
-    a.href = midiUrl;
-    a.download = midiFilename;
+    a.href = result.url;
+    a.download = result.filename;
     a.click();
   }
 
@@ -100,13 +98,13 @@ export function OutputBar(props: {
   // just the synthesized MIDI (mono); "mix" blends it with the original audio
   // (L = original, R = synthesis) for easy A/B comparison.
   async function downloadWav(mode: "synth" | "mix") {
-    if (midiBlob === null || currentFile === null) return;
+    if (result === null || currentFile === null) return;
     track("download", { format: mode === "mix" ? "wav_mix" : "wav_synth" });
     setBusy("Synthesizing…");
     try {
       const form = new FormData();
       form.append("mode", mode);
-      form.append("midi", midiBlob, "transcription.mid");
+      form.append("midi", result.midi, "transcription.mid");
       if (mode === "mix") form.append("audio", currentFile);
       const resp = await fetch("/auralize", { method: "POST", body: form });
       if (!resp.ok) throw new Error(await errorDetail(resp));
@@ -135,7 +133,7 @@ export function OutputBar(props: {
   // user picks files out of something the browser already has, with no further
   // round trip and no archive to open by hand.
   async function downloadSheets() {
-    if (midiBlob === null) return;
+    if (result === null) return;
     track("download", { format: "sheets" });
     // Already engraved this run — just show the picker again.
     if (sheets !== null) {
@@ -145,7 +143,11 @@ export function OutputBar(props: {
     setBusy("Generating…");
     try {
       const form = new FormData();
-      form.append("midi", midiBlob, "transcription.mid");
+      // Engrave the grid-snapped notes when the server managed to snap them:
+      // notation made from raw transcription can have spurious 128th notes etc.
+      const engrave = result.quantizedMidi ?? result.midi;
+      form.append("midi", engrave, "transcription.mid");
+      form.append("quantized", String(result.quantizedMidi !== null));
       const resp = await fetch("/sheets", { method: "POST", body: form });
       if (!resp.ok) throw new Error(await errorDetail(resp));
       const zipBlob = await resp.blob();
@@ -299,6 +301,7 @@ export function OutputBar(props: {
           files={sheets.files}
           zipBlob={sheets.zipBlob}
           zipFilename={sheets.zipFilename}
+          quantized={result?.quantizedMidi != null}
           onClose={() => setSheetsOpen(false)}
         />
       )}

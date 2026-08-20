@@ -26,9 +26,12 @@ export function SheetsDialog(props: {
   /** The archive as it arrived, for the "download all" row. */
   zipBlob: Blob;
   zipFilename: string;
+  /** Whether the notes were snapped to a beat grid before engraving. Without
+   *  one, note lengths and bar lines are guesses and the score reads badly. */
+  quantized: boolean;
   onClose: () => void;
 }) {
-  const { files, zipBlob, zipFilename, onClose } = props;
+  const { files, zipBlob, zipFilename, quantized, onClose } = props;
 
   const urls = useMemo(
     () =>
@@ -76,6 +79,13 @@ export function SheetsDialog(props: {
         <div className="border-b border-line px-5 py-4">
           <h2 className="m-0 text-base font-semibold text-content">Download sheet music</h2>
         </div>
+
+        {!quantized && (
+          <div className="border-b border-line bg-accent-2/10 px-5 py-3 text-[13px] text-accent-2">
+            We couldn't find a steady beat in this recording, so the bar lines are guesses.
+            The score may be hard to read.
+          </div>
+        )}
 
         <div className="min-h-0 flex-1 overflow-y-auto px-2 py-2">
           {files.map((file, i) => (

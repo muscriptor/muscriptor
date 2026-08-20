@@ -206,8 +206,13 @@ def test_with_onset_delay_measures_how_late_the_notes_are():
     grid = BeatGrid(bpm=126.0, beats_per_bar=4, first_downbeat=0.4, beats=beats)
     measured = grid.with_onset_delay(_onsets(beats, delay=0.012))
     assert abs(measured.onset_delay - 0.012) < 0.001
-    # Only the lag is filled in; the grid itself is left exactly as detected.
-    assert measured == dataclasses.replace(grid, onset_delay=measured.onset_delay)
+    # Only the lag and the grid it was measured on are filled in; the rest of the
+    # grid is left exactly as detected.
+    assert measured == dataclasses.replace(
+        grid,
+        onset_delay=measured.onset_delay,
+        beat_subdivision=measured.beat_subdivision,
+    )
 
 
 def test_with_onset_delay_is_zero_without_tracked_beats():

@@ -51,18 +51,15 @@ _INSTALL_HINT = (
     f"If it is installed somewhere unusual, set ${MUSESCORE_ENV_VAR} to it."
 )
 
-# MuseScore's MIDI import settings, passed with -M. HumanPerformance is the one
-# that matters: by default, MuseScore assumes the file is already
-# quantized and engraves every millisecond of transcription jitter as 128th
-# notes tied together. The tuplet searches are off because a transcription's
-# timing noise reads as triplets often enough to be worse than useless.
+# MuseScore's MIDI import settings, passed with -M. HumanPerformance and
+# QuantValue are MuseScore 4's own defaults, but spell them out.
 # Element names and the QuantValue index are MuseScore's own; 2 == 1/16.
-IMPORT_OPTIONS = """<?xml version="1.0" encoding="UTF-8"?>
+_IMPORT_OPTIONS = """<?xml version="1.0" encoding="UTF-8"?>
 <MidiOptions>
   <QuantValue>2</QuantValue>
   <HumanPerformance>true</HumanPerformance>
   <Duplets>false</Duplets>
-  <Triplets>false</Triplets>
+  <Triplets>{triplets}</Triplets>
   <Quadruplets>false</Quadruplets>
   <Quintuplets>false</Quintuplets>
   <Septuplets>false</Septuplets>
@@ -71,6 +68,16 @@ IMPORT_OPTIONS = """<?xml version="1.0" encoding="UTF-8"?>
   <DottedNotes>true</DottedNotes>
 </MidiOptions>
 """
+
+
+def import_options(quantized: bool) -> str:
+    """The -M import settings. Only search for triplets if we know the grid is accurate
+    thanks to quantization.
+
+    This choice wasn't validated very closely, maybe setting `true` always is ok too.
+    """
+    return _IMPORT_OPTIONS.format(triplets="true" if quantized else "false")
+
 
 # Tablature staff presets, by string count. MuseScore ships tab4Str…tab9Str;
 # anything outside that range (or with no strings at all) gets no tab staff.
@@ -324,14 +331,23 @@ def _retype_as_tablature(staff: ET.Element, preset: str, strings: int) -> None:
 
 
 def write_sheets(
-    midi_bytes: bytes, out_dir: Path, musescore: str | None = None
+    midi_bytes: bytes,
+    out_dir: Path,
+    musescore: str | None = None,
+    quantized: bool = False,
 ) -> list[Path]:
     """Engrave `midi_bytes` into `out_dir`, returning the files written.
 
-    Writes the MIDI, a MusicXML score, one PDF of the full score, and one PDF
-    of standard notation per instrument. Guitar and bass parts additionally get
-    a tablature PDF of their own, rendered from a second copy of the score whose
-    staves are retyped as tab. `out_dir` is created if it does not exist.
+    Writes the MIDI, a MusicXML score, one PDF of the full score,
+    and one PDF of standard notation per instrument. Guitar and bass parts
+    additionally get a tablature PDF of their own, rendered from a second copy
+    of the score whose staves are retyped as tab. `out_dir` is created if it
+    does not exist.
+
+    `quantized` says whether the notes are already snapped to a beat grid (by
+    `muscriptor.utils.midi.quantized_notes`), which is what the engraving wants:
+    it decides the triplet search, and unquantized input engraves the timing
+    jitter as tied 128th notes.
     """
     binary = musescore or find_musescore()
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -343,7 +359,7 @@ def write_sheets(
     with tempfile.TemporaryDirectory(prefix="muscriptor-sheets-") as tmp:
         tmp_dir = Path(tmp)
         options = tmp_dir / "import.xml"
-        options.write_text(IMPORT_OPTIONS)
+        options.write_text(import_options(quantized))
 
         # MuseScore's own project format, so the score can be copied and edited
         # (staves retyped as tab) before anything is rendered from it.

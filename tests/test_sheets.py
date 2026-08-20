@@ -192,9 +192,16 @@ class _FakeMuseScore:
         self.parts = list(parts)
         self.skip = set(skip)  # extensions to *not* write, to simulate failures
         self.calls = []
+        # Contents of every -M file, read here because the scratch directory
+        # holding it is gone by the time write_sheets returns.
+        self.options = []
 
     def __call__(self, binary, args):
         self.calls.append(args)
+        if "-M" in args:
+            self.options.append(
+                __import__("pathlib").Path(args[args.index("-M") + 1]).read_text()
+            )
         stdout = ""
         if "--score-parts-pdf" in args:
             import base64
@@ -255,6 +262,22 @@ def test_write_sheets_passes_the_import_options(tmp_path, monkeypatch):
     monkeypatch.setattr(sheets, "_run", fake)
     sheets.write_sheets(b"MThd-fake", tmp_path / "sheets", musescore="/fake/mscore")
     assert "-M" in fake.calls[0]
+
+
+def test_the_triplet_search_follows_the_quantized_flag(tmp_path, monkeypatch):
+    """Snapping onto triplets is pointless if MuseScore then engraves them as ties,
+    and searching for them in unquantized input reads the jitter as triplets."""
+    fake = _FakeMuseScore()
+    monkeypatch.setattr(sheets, "_run", fake)
+    for quantized in (True, False):
+        sheets.write_sheets(
+            b"MThd-fake",
+            tmp_path / str(quantized),
+            musescore="/fake/mscore",
+            quantized=quantized,
+        )
+    assert "<Triplets>true</Triplets>" in fake.options[0]
+    assert "<Triplets>false</Triplets>" in fake.options[1]
 
 
 def test_write_sheets_reports_a_pdf_that_never_appeared(tmp_path, monkeypatch):

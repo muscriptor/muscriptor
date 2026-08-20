@@ -42,9 +42,9 @@ class _FakeModel:
         yield s1
         yield NoteEndEvent(end_time=0.9, start_event=s1)
 
-    def transcribe_to_midi(self, **kwargs):
+    def transcribe_and_postprocess(self, **kwargs):
         type(self).last_kwargs = kwargs
-        return b"FAKE_MIDI"
+        return b"FAKE_MIDI", None
 
 
 @pytest.fixture

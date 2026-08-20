@@ -2,7 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import clsx from "clsx";
 import type { PianoRoll } from "./pianoroll";
 import { useAudioEngine } from "./hooks/useAudioEngine";
-import { useTranscription, type AppState } from "./hooks/useTranscription";
+import {
+  useTranscription,
+  type AppState,
+  type TranscriptionResult,
+} from "./hooks/useTranscription";
 import { Controls } from "./components/Controls";
 import { OutputBar } from "./components/OutputBar";
 import { FeedbackLine } from "./components/FeedbackLine";
@@ -76,8 +80,8 @@ export function App() {
   // null = healthy and no file error.
   const [error, setError] = useState<AppError | null>(null);
   const [instruments, setInstruments] = useState<string[]>([]);
-  const [midiUrl, setMidiUrl] = useState<string | null>(null);
-  const [midiBlob, setMidiBlob] = useState<Blob | null>(null);
+  // The finished transcription's exports
+  const [result, setResult] = useState<TranscriptionResult | null>(null);
   const [currentFile, setCurrentFile] = useState<File | null>(null);
   const [mix, setMix] = useState(0.75);
   const [stereo, setStereo] = useState(false);
@@ -87,7 +91,6 @@ export function App() {
   // this swaps the panel's prompt in place instead of showing the overlay.
   const [dragging, setDragging] = useState(false);
 
-  const midiFilenameRef = useRef("transcription.mid");
   // Mirror of the selected conditioning set, read at submit time without
   // re-creating `transcribe` whenever the selection changes.
   const condRef = useRef(condSelected);
@@ -118,11 +121,9 @@ export function App() {
       setSubmit({ phase: "busy", retryAt: Date.now() + retryInMs, attempt }),
     setAppState,
     setInstruments,
-    setMidiUrl,
-    setMidiBlob,
+    setResult,
     setCurrentFile,
     setUserScrolled,
-    midiFilenameRef,
   });
   // Submit the file picked on the welcome screen. The view only switches once
   // the server has accepted the request (`onAccepted` above); until then the
@@ -171,8 +172,7 @@ export function App() {
     audio.reset();
     rollRef.current?.clear();
     setInstruments([]);
-    setMidiUrl(null);
-    setMidiBlob(null);
+    setResult(null);
     setUserScrolled(false);
     setAppState("idle");
     setSubmit({ phase: "idle" });
@@ -447,9 +447,7 @@ export function App() {
             transcribing={appState === "transcribing"}
             progressFillRef={progressFillRef}
             progressLabelRef={progressLabelRef}
-            midiUrl={midiUrl}
-            midiFilename={midiFilenameRef.current}
-            midiBlob={midiBlob}
+            result={result}
             currentFile={currentFile}
             onTranscribeAnother={transcribeAnother}
           />
