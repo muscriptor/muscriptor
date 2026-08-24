@@ -57,7 +57,7 @@ def report(client, prop, days, dimensions, event_name=None, metrics=("eventCount
     """One GA4 report, optionally filtered to a single event, as a DataFrame."""
     req = RunReportRequest(
         property=f"properties/{prop}",
-        date_ranges=[DateRange(start_date=f"{days}daysAgo", end_date="today")],
+        date_ranges=[DateRange(start_date=f"{days}daysAgo", end_date="yesterday")],
         dimensions=[Dimension(name=d) for d in dimensions],
         metrics=[Metric(name=m) for m in metrics],
         limit=100000,
@@ -261,8 +261,8 @@ def fig_daily(tables):
         title=dict(
             text="Activity and health per day",
             subtitle=dict(
-                text="Today is partial — the last point always dips. A busy server "
-                "retries, so its line counts retries, not distinct waits."
+                text="A busy server retries, so its line counts retries, not "
+                "distinct waits."
             ),
         ),
         height=440,
@@ -432,7 +432,7 @@ PAGE = """<!doctype html>
   .tile.warn {{ flex-basis: 100%; font-size: 12px; color: #52514e; }}
 </style>
 <h1>Muscriptor usage</h1>
-<p class="sub">Last {days} days, generated {stamp}.</p>
+<p class="sub">Last {days} full days (through yesterday), generated {stamp}.</p>
 {stats}
 {charts}
 """
