@@ -25,12 +25,14 @@ class _FakeInner:
 class _FakeModel:
     # kwargs of the most recent transcribe() call (reset by `patched_model`).
     last_kwargs: dict | None = None
+    last_load_kwargs: dict | None = None
 
     def __init__(self):
         self._model = _FakeInner()
 
     @classmethod
-    def load_model(cls, **_):
+    def load_model(cls, **kwargs):
+        cls.last_load_kwargs = kwargs
         return cls()
 
     def transcribe(self, **kwargs):
@@ -61,6 +63,7 @@ def fake_audio(tmp_path: Path) -> Path:
 @pytest.fixture
 def patched_model(monkeypatch):
     _FakeModel.last_kwargs = None
+    _FakeModel.last_load_kwargs = None
     monkeypatch.setattr(main_mod, "TranscriptionModel", _FakeModel)
 
 
@@ -203,3 +206,107 @@ def test_instruments_passed_to_model(patched_model, fake_audio):
     )
     assert result.exit_code == 0, result.stderr
     assert _FakeModel.last_kwargs["instruments"] == ["violin", "drums"]
+
+
+def test_speculative_options_are_forwarded_to_model_loader(patched_model, fake_audio):
+    runner = CliRunner()
+    result = runner.invoke(
+        main_mod.app,
+        [
+            "transcribe",
+            str(fake_audio),
+            "--model",
+            "large",
+            "--draft-model",
+            "small",
+            "--speculative-k",
+            "4",
+            "-f",
+            "jsonl",
+            "-o",
+            "-",
+        ],
+    )
+
+    assert (result.exit_code, _FakeModel.last_load_kwargs) == (
+        0,
+        {
+            "weights_path": "large",
+            "device": None,
+            "dtype": None,
+            "draft_weights_path": "small",
+            "speculative_k": 4,
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    ("options", "message"),
+    [
+        (["--sampling"], "greedy decoding"),
+        (["--cfg-coef", "2"], "--cfg-coef 1"),
+        (["--beam-size", "2"], "--beam-size 1"),
+        (
+            ["--batch-size", "2", "--no-prelude-forcing"],
+            "--batch-size 1",
+        ),
+        (["--no-prelude-forcing"], "--batch-size 1"),
+    ],
+)
+def test_unsupported_speculative_cli_options_fail_before_model_load(
+    patched_model, fake_audio, options, message
+):
+    runner = CliRunner()
+    result = runner.invoke(
+        main_mod.app,
+        [
+            "transcribe",
+            str(fake_audio),
+            "--draft-model",
+            "small",
+            *options,
+            "-f",
+            "jsonl",
+            "-o",
+            "-",
+        ],
+    )
+
+    assert (
+        result.exit_code,
+        message in result.stderr,
+        _FakeModel.last_load_kwargs,
+    ) == (1, True, None)
+
+
+def test_serve_forwards_speculative_options(patched_model, monkeypatch):
+    import uvicorn
+
+    import muscriptor.server as server_module
+
+    monkeypatch.setattr(server_module, "create_app", lambda loaded_model, **_: object())
+    monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: None)
+
+    result = CliRunner().invoke(
+        main_mod.app,
+        [
+            "serve",
+            "--model",
+            "large",
+            "--draft-model",
+            "small",
+            "--speculative-k",
+            "4",
+        ],
+    )
+
+    assert (result.exit_code, _FakeModel.last_load_kwargs) == (
+        0,
+        {
+            "weights_path": "large",
+            "device": None,
+            "dtype": None,
+            "draft_weights_path": "small",
+            "speculative_k": 4,
+        },
+    )

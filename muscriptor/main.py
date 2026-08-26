@@ -10,6 +10,7 @@ from typing import Annotated, Literal
 import typer
 
 from muscriptor.events import NoteEndEvent, NoteStartEvent, ProgressEvent
+from muscriptor.models.speculative import DEFAULT_DRAFT_K, validate_draft_k
 from muscriptor.tokenizer.mt3 import (
     MT3_FULL_PLUS_GROUP_NAMES,
     resolve_instrument_names,
@@ -29,13 +30,21 @@ app = typer.Typer(add_completion=False, help="muscriptor — audio-to-MIDI trans
 
 
 def _load_model(
-    model_path: str | None, device: str | None, dtype: str | None = None
+    model_path: str | None,
+    device: str | None,
+    dtype: str | None = None,
+    draft_model_path: str | None = None,
+    speculative_k: int = DEFAULT_DRAFT_K,
 ) -> TranscriptionModel:
     """load_model with CLI-friendly failure: known download problems (missing
     HuggingFace authentication, …) print a plain message instead of a traceback."""
     try:
         return TranscriptionModel.load_model(
-            weights_path=model_path, device=device, dtype=dtype
+            weights_path=model_path,
+            device=device,
+            dtype=dtype,
+            draft_weights_path=draft_model_path,
+            speculative_k=speculative_k,
         )
     except ModelDownloadError as e:
         typer.echo(f"Error: {e}", err=True)
@@ -135,6 +144,26 @@ def transcribe(
             help=(
                 "Model size ('small', 'medium', 'large'; default: medium), "
                 "a local safetensors path, or an hf:// / http(s):// URL"
+            ),
+        ),
+    ] = None,
+    draft_model_path: Annotated[
+        str | None,
+        typer.Option(
+            "--draft-model",
+            help=(
+                "Optional draft model size or checkpoint for greedy speculative "
+                "decoding (recommended: small with --model large)"
+            ),
+        ),
+    ] = None,
+    speculative_k: Annotated[
+        int | None,
+        typer.Option(
+            "--speculative-k",
+            help=(
+                "Draft tokens proposed per target verification block (1-4; "
+                "default: 2 when --draft-model is set)"
             ),
         ),
     ] = None,
@@ -268,6 +297,41 @@ def transcribe(
         )
         raise typer.Exit(1)
 
+    if draft_model_path is None and speculative_k is not None:
+        typer.echo("Error: --speculative-k requires --draft-model", err=True)
+        raise typer.Exit(1)
+    if draft_model_path is not None:
+        resolved_k = DEFAULT_DRAFT_K if speculative_k is None else speculative_k
+        try:
+            validate_draft_k(resolved_k)
+        except ValueError as error:
+            typer.echo(f"Error: {error}", err=True)
+            raise typer.Exit(1)
+        if sampling:
+            typer.echo(
+                "Error: --draft-model requires greedy decoding; remove --sampling",
+                err=True,
+            )
+            raise typer.Exit(1)
+        if cfg_coef != 1.0:
+            typer.echo("Error: --draft-model requires --cfg-coef 1", err=True)
+            raise typer.Exit(1)
+        if beam_size != 1:
+            typer.echo("Error: --draft-model requires --beam-size 1", err=True)
+            raise typer.Exit(1)
+        if batch_size not in (None, 1):
+            typer.echo("Error: --draft-model requires --batch-size 1", err=True)
+            raise typer.Exit(1)
+        if not prelude_forcing and batch_size is None:
+            typer.echo(
+                "Error: --draft-model with --no-prelude-forcing requires "
+                "--batch-size 1",
+                err=True,
+            )
+            raise typer.Exit(1)
+    else:
+        resolved_k = DEFAULT_DRAFT_K
+
     is_stdout = output is not None and str(output) == "-"
 
     if output is None:
@@ -303,7 +367,13 @@ def transcribe(
     # All chatty progress/timing info goes to stderr — stdout is reserved for
     # the actual output when `-o -` is used.
     typer.echo("Loading model…", err=True)
-    model = _load_model(model_path, _device, dtype)
+    model = _load_model(
+        model_path,
+        _device,
+        dtype,
+        draft_model_path=draft_model_path,
+        speculative_k=resolved_k,
+    )
 
     typer.echo(f"Transcribing {audio_file} …", err=True)
 
@@ -311,17 +381,17 @@ def transcribe(
         typer.echo("Error: --auralize requires --format midi", err=True)
         raise typer.Exit(1)
 
-    kwargs = dict(
-        audio=audio_file,
-        use_sampling=sampling,
-        temperature=temperature,
-        cfg_coef=cfg_coef,
-        instruments=instrument_names,
-        batch_size=batch_size,
-        no_eos_is_ok=not strict_eos,
-        beam_size=beam_size,
-        prelude_forcing=prelude_forcing,
-    )
+    kwargs = {
+        "audio": audio_file,
+        "use_sampling": sampling,
+        "temperature": temperature,
+        "cfg_coef": cfg_coef,
+        "instruments": instrument_names,
+        "batch_size": batch_size,
+        "no_eos_is_ok": not strict_eos,
+        "beam_size": beam_size,
+        "prelude_forcing": prelude_forcing,
+    }
 
     if format == OutputFormat.sheets:
         # Quantize to get the "idealized" timing, otherwise we might get very weird
@@ -416,6 +486,20 @@ def serve(
             ),
         ),
     ] = None,
+    draft_model_path: Annotated[
+        str | None,
+        typer.Option(
+            "--draft-model",
+            help="Optional draft model size or checkpoint for speculative decoding",
+        ),
+    ] = None,
+    speculative_k: Annotated[
+        int | None,
+        typer.Option(
+            "--speculative-k",
+            help="Draft tokens proposed per target verification block (1-4)",
+        ),
+    ] = None,
     device: Annotated[
         str,
         typer.Option(
@@ -444,9 +528,26 @@ def serve(
         level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
     )
 
+    if draft_model_path is None and speculative_k is not None:
+        typer.echo("Error: --speculative-k requires --draft-model", err=True)
+        raise typer.Exit(1)
+    resolved_k = DEFAULT_DRAFT_K if speculative_k is None else speculative_k
+    if draft_model_path is not None:
+        try:
+            validate_draft_k(resolved_k)
+        except ValueError as error:
+            typer.echo(f"Error: {error}", err=True)
+            raise typer.Exit(1)
+
     _device = None if device == "auto" else device
     typer.echo("Loading model…")
-    model = _load_model(model_path, _device, dtype)
+    model = _load_model(
+        model_path,
+        _device,
+        dtype,
+        draft_model_path=draft_model_path,
+        speculative_k=resolved_k,
+    )
     web_dir = Path(__file__).resolve().parent / "web_dist"
     fastapi_app = create_app(model, web_dir=web_dir if web_dir.is_dir() else None)
     uvicorn.run(fastapi_app, host=host, port=port)
