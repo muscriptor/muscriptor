@@ -5,11 +5,10 @@ from torch.nn import functional as F
 
 from muscriptor.modules.streaming import increment_steps, init_states
 from muscriptor.modules.transformer import (
-    create_sin_embedding,
     StreamingMultiheadAttention,
     StreamingTransformer,
+    create_sin_embedding,
 )
-
 
 # ---------------------------------------------------------------------------
 # Sinusoidal embeddings
@@ -164,7 +163,12 @@ def test_attention_decode_updates_one_cache_slice_at_nonzero_offset():
 
 
 def _make_transformer(**kwargs):
-    defaults = dict(d_model=32, num_heads=2, num_layers=2, dim_feedforward=64)
+    defaults = {
+        "d_model": 32,
+        "num_heads": 2,
+        "num_layers": 2,
+        "dim_feedforward": 64,
+    }
     defaults.update(kwargs)
     return StreamingTransformer(**defaults)
 
@@ -194,6 +198,21 @@ def test_streaming_transformer_streaming_mode():
     streaming_out = torch.cat(streaming_outs, dim=1)
 
     assert streaming_out.shape == (1, 6, 32)
+
+
+def test_streaming_transformer_cached_block_matches_full_causal_forward():
+    torch.manual_seed(2)
+    model = _make_transformer().eval()
+    inputs = torch.randn(1, 5, 32)
+
+    with torch.no_grad():
+        expected = model(inputs)[:, 2:]
+        state = init_states(model, batch_size=1, sequence_length=5)
+        model(inputs[:, :2], model_state=state)
+        increment_steps(model, state, increment=2)
+        actual = model(inputs[:, 2:], model_state=state)
+
+    torch.testing.assert_close(actual, expected)
 
 
 def test_streaming_transformer_fresh_state():

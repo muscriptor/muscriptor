@@ -1,7 +1,7 @@
 """Causal streaming transformer for muscriptor inference."""
 
 import torch
-import torch.nn as nn
+from torch import nn
 from torch.nn import functional as F
 
 from muscriptor.modules.streaming import ModelState, State, StatefulModule
@@ -79,6 +79,8 @@ class StreamingMultiheadAttention(StatefulModule):
         self,
         query: torch.Tensor,
         model_state: ModelState | None = None,
+        *,
+        attention_mask: torch.Tensor | None = None,
     ):
         state = self.get_state(model_state)
         projected = nn.functional.linear(query, self.in_proj_weight)
@@ -98,12 +100,19 @@ class StreamingMultiheadAttention(StatefulModule):
         # (T_q=1, T_k=cache_len) attend to all past tokens; PyTorch's
         # is_causal=True is top-left aligned and would mask out all cached
         # tokens except position 0 when T_q < T_k. An explicit attn_mask
-        # forces SDPA onto the unfused math fallback, so only build one in
-        # the rectangular case that actually needs it — the two shapes this
-        # model hits (single-token decode and square prefill) stay mask-free
-        # and dispatch to the fused (flash) CPU/CUDA kernels.
+        # can prevent dispatch to the fused flash kernel, so only build one in
+        # the rectangular case that actually needs it — single-token decode
+        # and square prefill stay mask-free.
         T_q, T_k = q_t.shape[2], k_t.shape[2]
-        if T_q == 1:
+        if attention_mask is not None:
+            x = F.scaled_dot_product_attention(
+                q_t,
+                k_t,
+                v_t,
+                attn_mask=attention_mask,
+                dropout_p=0.0,
+            )
+        elif T_q == 1:
             # One query row, bottom-right aligned: nothing is masked.
             x = F.scaled_dot_product_attention(q_t, k_t, v_t, dropout_p=0.0)
         elif T_q == T_k:
@@ -112,9 +121,10 @@ class StreamingMultiheadAttention(StatefulModule):
                 q_t, k_t, v_t, is_causal=True, dropout_p=0.0
             )
         else:
-            # Unused in practice
+            # Cached blocks need an explicitly bottom-right-aligned mask.
             raise NotImplementedError(
-                f"Streaming attention with T_q={T_q} and T_k={T_k} is not supported; use T_q=1 or T_q=T_k."
+                f"Streaming attention with T_q={T_q} and T_k={T_k} "
+                "requires an attention mask."
             )
         x = x.transpose(1, 2).to(dtype)
 
@@ -148,8 +158,14 @@ class StreamingTransformerLayer(nn.Module):
         self,
         x: torch.Tensor,
         model_state: ModelState | None = None,
+        *,
+        attention_mask: torch.Tensor | None = None,
     ):
-        x = x + self.self_attn(self.norm1(x), model_state=model_state)
+        x = x + self.self_attn(
+            self.norm1(x),
+            model_state=model_state,
+            attention_mask=attention_mask,
+        )
         x = x + self.linear2(F.gelu(self.linear1(self.norm2(x))))
         return x
 
@@ -217,6 +233,25 @@ class StreamingTransformer(StatefulModule):
         )
         x = x + (pos_emb * (positions >= 0).float()).to(x.dtype)
 
+        attention_mask = None
+        if model_state is not None and T > 1:
+            attention_state = self.layers[0].self_attn.get_state(model_state)
+            if attention_state is not None:
+                past_length = attention_state["offset"]
+                if past_length > 0:
+                    # Query row i is the absolute position past_length + i.
+                    # Build this once and share it across all layers.
+                    attention_mask = torch.ones(
+                        T,
+                        past_length + T,
+                        device=x.device,
+                        dtype=torch.bool,
+                    ).tril(diagonal=past_length)
+
         for layer in self.layers:
-            x = layer(x, model_state=model_state)
+            x = layer(
+                x,
+                model_state=model_state,
+                attention_mask=attention_mask,
+            )
         return x
