@@ -8,7 +8,8 @@
     "dev": "vite",
     "dev:proxy": "BACKEND_URL=https://muscriptor.kyutai.org vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.2",
@@ -16,9 +17,11 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
+    "happy-dom": "^20.12.0",
     "tailwindcss": "^4.3.2",
     "typescript": "^6.0.3",
-    "vite": "^8.0.14"
+    "vite": "^8.0.14",
+    "vitest": "^4.1.11"
   },
   "dependencies": {
     "clsx": "^2.1.1",
