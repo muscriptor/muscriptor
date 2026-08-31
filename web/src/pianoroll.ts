@@ -136,6 +136,25 @@ const DEFAULT_PITCH_RANGE = DEFAULT_PITCH_TOP - PITCH_MIN + 1; // 64
 /** Width in px of the piano-key strip on the left edge. */
 export const KEY_WIDTH = 56;
 
+const NOTE_NAMES = ["C", "C♯", "D", "D♯", "E", "F", "F♯", "G", "G♯", "A", "A♯", "B"] as const;
+
+/** Scientific pitch notation for a MIDI note number, e.g. 60 → "C4". */
+export function noteLabel(pitch: number): string {
+  return `${NOTE_NAMES[pitch % 12]}${Math.floor(pitch / 12) - 1}`;
+}
+
+/**
+ * Human-readable note duration. Always shows seconds; appends beat count when
+ * BPM is known, e.g. "0.50 s · 1 beat" or "0.38 s · 0.75 beats".
+ */
+export function durationLabel(durationSec: number, bpm: number | null): string {
+  const sec = `${durationSec.toFixed(2)} s`;
+  if (bpm === null) return sec;
+  const beats = (durationSec * bpm) / 60;
+  const beatsStr = parseFloat(beats.toFixed(2)).toString();
+  return `${sec} · ${beatsStr} ${beatsStr === "1" ? "beat" : "beats"}`;
+}
+
 /** Black keys within an octave (C=0): C#, D#, F#, G#, A#. */
 function isBlackKey(pitch: number): boolean {
   const n = ((pitch % 12) + 12) % 12;
@@ -254,6 +273,10 @@ export class PianoRoll {
     return this._pxPerSec;
   }
 
+  get bpm(): number | null {
+    return this.beatGrid?.bpm ?? null;
+  }
+
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     this.ctx = canvas.getContext("2d")!;
@@ -311,6 +334,36 @@ export class PianoRoll {
 
   setPlayhead(seconds: number) {
     this.playhead = seconds;
+  }
+
+  /** Return the topmost visible note under canvas coordinates, if any. */
+  noteAt(x: number, y: number): RollNote | null {
+    const { height } = this.canvas.getBoundingClientRect();
+    if (x < KEY_WIDTH || y < 0 || y > height) return null;
+    const rowH = this.pxPerPitch ?? height / DEFAULT_PITCH_RANGE;
+    const pitchTop =
+      this.pxPerPitch === null ? DEFAULT_PITCH_TOP : this.pitchTop;
+    const rowGap = Math.max(0.5, Math.min(4, rowH * 0.1));
+    const maxShift = Math.min(3, Math.max(0, rowGap - 1));
+
+    // Iterate in reverse draw order so an overlapping note in front wins.
+    for (const note of [...this.notes].reverse()) {
+      if (
+        note.pitch < PITCH_MIN ||
+        note.pitch > PITCH_MAX ||
+        this.hiddenInstruments.has(note.instrument)
+      ) {
+        continue;
+      }
+      const left = KEY_WIDTH + (note.start - this.lastOffset) * this._pxPerSec;
+      const width = Math.max(2, (note.end - note.start) * this._pxPerSec - NOTE_GAP_PX);
+      const shift = Math.min((note.stackOffset ?? 0) * NOTE_STACK_PX, maxShift);
+      const top = (pitchTop - note.pitch) * rowH - shift;
+      if (x >= left && x <= left + width && y >= top && y <= top + Math.max(2, rowH - rowGap)) {
+        return note;
+      }
+    }
+    return null;
   }
 
   /**
