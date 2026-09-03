@@ -1,6 +1,7 @@
 """Tests for muscriptor/utils/midi.py."""
 
 import dataclasses
+import io
 
 import numpy as np
 import pytest
@@ -8,7 +9,7 @@ from mido import MidiFile
 
 from muscriptor.tokenizer.notes import Note
 from muscriptor.utils.beats import BAR_OFFSET_MARKER, BeatGrid, read_bar_offset
-from muscriptor.utils.midi import notes_to_midi
+from muscriptor.utils.midi import notes_to_midi, rewrite_midi_tempo
 
 
 def _metas(midi, msg_type):
@@ -46,6 +47,21 @@ def test_every_note_track_repeats_the_tempo():
     for track in midi.tracks[1:]:
         tempos = [m for m in track if m.type == "set_tempo"]
         assert [m.tempo for m in tempos] == [round(60_000_000 / 90)]
+
+
+def test_rewrite_midi_tempo_updates_all_tempo_events():
+    midi = notes_to_midi(
+        _sample_notes(),
+        beat_grid=BeatGrid(bpm=90, beats_per_bar=None, first_downbeat=0.0),
+    )
+    buf = io.BytesIO()
+    midi.save(file=buf)
+
+    rewritten = MidiFile(file=io.BytesIO(rewrite_midi_tempo(buf.getvalue(), 133.5)))
+
+    assert {m.tempo for m in _metas(rewritten, "set_tempo")} == {
+        round(60_000_000 / 133.5)
+    }
 
 
 def test_notes_to_midi_empty_notes():

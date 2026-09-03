@@ -1,6 +1,9 @@
 """MIDI output utilities."""
 
 import dataclasses
+import io
+
+from mido import MetaMessage, MidiFile
 
 from muscriptor.tokenizer.notes import (
     Note,
@@ -13,6 +16,33 @@ from muscriptor.utils.beats import BeatGrid
 # Written when no grid was detected: 120 BPM and no time signature, leaving the
 # meter for notation software to guess.
 PLACEHOLDER_GRID = BeatGrid(bpm=120, beats_per_bar=None, first_downbeat=0.0)
+
+
+def rewrite_midi_tempo(midi_bytes: bytes, bpm: float) -> bytes:
+    """Return `midi_bytes` with every tempo event set to `bpm`.
+
+    `notes_to_midi` repeats tempo on note tracks for MuseScore compatibility, so
+    a manual tempo override must update all existing set_tempo messages instead
+    of only the first conductor-track one.
+    """
+    if bpm <= 0:
+        raise ValueError("bpm must be positive")
+    midi = MidiFile(file=io.BytesIO(midi_bytes))
+    tempo = round(60_000_000 / bpm)
+    changed = False
+    for track in midi.tracks:
+        for msg in track:
+            if msg.type == "set_tempo":
+                msg.tempo = tempo
+                changed = True
+    if not changed:
+        if not midi.tracks:
+            midi.add_track()
+        midi.tracks[0].insert(0, MetaMessage("set_tempo", tempo=tempo, time=0))
+
+    out = io.BytesIO()
+    midi.save(file=out)
+    return out.getvalue()
 
 
 def shifted_notes(notes: list[Note], delay_s: float) -> list[Note]:

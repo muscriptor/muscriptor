@@ -314,16 +314,16 @@ export class PianoRoll {
   }
 
   /**
-   * Switch the time grid from seconds to bars/beats, moving the notes onto it by
-   * the grid's `onset_delay`. The grid itself is drawn in original-audio time, so
-   * 0s stays at 0s and the first bar line lands on the detected downbeat (with
-   * earlier bar lines extrapolated backwards). null keeps the seconds grid.
-   *
-   * The caller has to shift the scheduled audio to match (AudioEngine.shiftNotes).
+   * Switch the time grid from seconds to bars/beats. The initial transcription
+   * also moves already-drawn notes by the grid's `onset_delay`, matching the MIDI
+   * file; later manual tempo edits only replace the grid spacing.
    */
-  setBeatGrid(grid: BeatGrid | null) {
+  setBeatGrid(
+    grid: BeatGrid | null,
+    opts: { shiftNotes?: boolean } = {},
+  ) {
     this.beatGrid = grid;
-    if (!grid?.onset_delay) return;
+    if (!opts.shiftNotes || !grid?.onset_delay) return;
     for (const n of this.notes) {
       n.start -= grid.onset_delay;
       n.end -= grid.onset_delay;

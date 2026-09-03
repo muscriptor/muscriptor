@@ -11,6 +11,7 @@ export default defineConfig({
     proxy: Object.fromEntries(
       [
         "/transcribe",
+        "/midi/tempo",
         "/instruments",
         "/auralize",
         "/sheets",

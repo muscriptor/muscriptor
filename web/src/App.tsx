@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import clsx from "clsx";
-import type { PianoRoll } from "./pianoroll";
+import type { BeatGrid, PianoRoll } from "./pianoroll";
 import { useAudioEngine } from "./hooks/useAudioEngine";
 import {
   useTranscription,
@@ -60,6 +60,28 @@ const EXAMPLE = {
   ],
 };
 
+function formatBpm(bpm: number): string {
+  return bpm.toFixed(2).replace(/\.?0+$/, "");
+}
+
+async function errorDetail(resp: Response): Promise<string> {
+  const text = await resp.text();
+  try {
+    return JSON.parse(text).detail ?? text;
+  } catch {
+    return text;
+  }
+}
+
+async function rewriteTempoBlob(midi: Blob, bpm: number): Promise<Blob> {
+  const form = new FormData();
+  form.append("midi", midi, "transcription.mid");
+  form.append("bpm", String(bpm));
+  const resp = await fetch("/midi/tempo", { method: "POST", body: form });
+  if (!resp.ok) throw new Error(await errorDetail(resp));
+  return await resp.blob();
+}
+
 export function App() {
   const audio = useAudioEngine();
   const rollRef = useRef<PianoRoll | null>(null);
@@ -82,6 +104,9 @@ export function App() {
   const [instruments, setInstruments] = useState<string[]>([]);
   // The finished transcription's exports
   const [result, setResult] = useState<TranscriptionResult | null>(null);
+  const [tempoInput, setTempoInput] = useState("");
+  const [tempoBusy, setTempoBusy] = useState(false);
+  const [tempoError, setTempoError] = useState<string | null>(null);
   const [currentFile, setCurrentFile] = useState<File | null>(null);
   const [mix, setMix] = useState(0.75);
   const [stereo, setStereo] = useState(false);
@@ -100,7 +125,7 @@ export function App() {
   const appStateRef = useRef(appState);
   appStateRef.current = appState;
 
-  const { transcribe, abort } = useTranscription({
+  const { transcribe, abort, replaceResultMidi } = useTranscription({
     audio,
     rollRef,
     getConditioning: () => Array.from(condRef.current),
@@ -125,6 +150,42 @@ export function App() {
     setCurrentFile,
     setUserScrolled,
   });
+
+  useEffect(() => {
+    setTempoInput(result?.beatGrid ? formatBpm(result.beatGrid.bpm) : "");
+    setTempoError(null);
+  }, [result?.url]);
+
+  async function applyTempo() {
+    if (result === null || tempoBusy) return;
+    const bpm = Number(tempoInput.trim());
+    if (!Number.isFinite(bpm) || bpm < 20 || bpm > 400) {
+      setTempoError("Use 20-400 BPM");
+      return;
+    }
+    setTempoBusy(true);
+    setTempoError(null);
+    try {
+      const [midi, quantizedMidi] = await Promise.all([
+        rewriteTempoBlob(result.midi, bpm),
+        result.quantizedMidi === null
+          ? Promise.resolve(null)
+          : rewriteTempoBlob(result.quantizedMidi, bpm),
+      ]);
+      const beatGrid: BeatGrid = result.beatGrid
+        ? { ...result.beatGrid, bpm }
+        : { bpm, beats_per_bar: null, first_downbeat: 0, onset_delay: 0 };
+      replaceResultMidi(midi, quantizedMidi, beatGrid);
+      rollRef.current?.setBeatGrid(beatGrid);
+      track("tempo_override", { bpm: Math.round(bpm) });
+    } catch (e) {
+      const message = (e as Error).message;
+      setTempoError(message);
+      alert("Couldn't apply the tempo: " + message);
+    } finally {
+      setTempoBusy(false);
+    }
+  }
   // Submit the file picked on the welcome screen. The view only switches once
   // the server has accepted the request (`onAccepted` above); until then the
   // button reports progress — including waiting out a busy server. Called from
@@ -429,6 +490,15 @@ export function App() {
                 setUserScrolled(true);
               }
             }}
+            tempoInput={tempoInput}
+            onTempoInputChange={(v) => {
+              setTempoInput(v);
+              setTempoError(null);
+            }}
+            onApplyTempo={applyTempo}
+            tempoDisabled={result === null}
+            tempoBusy={tempoBusy}
+            tempoError={tempoError}
           />
 
           <PianoRollCanvas rollRef={rollRef} audio={audio} setUserScrolled={setUserScrolled} />
