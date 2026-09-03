@@ -3,7 +3,7 @@
 import dataclasses
 import io
 
-from mido import MetaMessage, MidiFile
+from mido import MetaMessage, MidiFile, second2tick, tick2second
 
 from muscriptor.tokenizer.notes import (
     Note,
@@ -19,26 +19,61 @@ PLACEHOLDER_GRID = BeatGrid(bpm=120, beats_per_bar=None, first_downbeat=0.0)
 
 
 def rewrite_midi_tempo(midi_bytes: bytes, bpm: float) -> bytes:
-    """Return `midi_bytes` with every tempo event set to `bpm`.
+    """Return `midi_bytes` at `bpm`, preserving message times in seconds.
 
     `notes_to_midi` repeats tempo on note tracks for MuseScore compatibility, so
     a manual tempo override must update all existing set_tempo messages instead
-    of only the first conductor-track one.
+    of only the first conductor-track one. Delta ticks are rewritten too:
+    otherwise changing the tempo would stretch or shrink the performance.
     """
     if bpm <= 0:
         raise ValueError("bpm must be positive")
     midi = MidiFile(file=io.BytesIO(midi_bytes))
-    tempo = round(60_000_000 / bpm)
+    new_tempo = round(60_000_000 / bpm)
+
+    tempo_events = [(0, 500000)]
+    for track in midi.tracks:
+        absolute_tick = 0
+        for msg in track:
+            absolute_tick += msg.time
+            if msg.type == "set_tempo":
+                tempo_events.append((absolute_tick, msg.tempo))
+    tempo_events.sort(key=lambda event: event[0])
+
+    def seconds_at_tick(target_tick: int) -> float:
+        seconds = 0.0
+        previous_tick = 0
+        tempo = 500000
+        for tick, next_tempo in tempo_events[1:]:
+            if tick > target_tick:
+                break
+            seconds += tick2second(tick - previous_tick, midi.ticks_per_beat, tempo)
+            previous_tick = tick
+            tempo = next_tempo
+        seconds += tick2second(
+            target_tick - previous_tick, midi.ticks_per_beat, tempo
+        )
+        return seconds
+
     changed = False
     for track in midi.tracks:
+        old_absolute_tick = 0
+        new_absolute_tick = 0
         for msg in track:
+            old_absolute_tick += msg.time
+            old_elapsed_seconds = seconds_at_tick(old_absolute_tick)
+            next_absolute_tick = round(
+                second2tick(old_elapsed_seconds, midi.ticks_per_beat, new_tempo)
+            )
+            msg.time = next_absolute_tick - new_absolute_tick
+            new_absolute_tick = next_absolute_tick
             if msg.type == "set_tempo":
-                msg.tempo = tempo
+                msg.tempo = new_tempo
                 changed = True
     if not changed:
         if not midi.tracks:
             midi.add_track()
-        midi.tracks[0].insert(0, MetaMessage("set_tempo", tempo=tempo, time=0))
+        midi.tracks[0].insert(0, MetaMessage("set_tempo", tempo=new_tempo, time=0))
 
     out = io.BytesIO()
     midi.save(file=out)

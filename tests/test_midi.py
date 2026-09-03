@@ -54,6 +54,7 @@ def test_rewrite_midi_tempo_updates_all_tempo_events():
         _sample_notes(),
         beat_grid=BeatGrid(bpm=90, beats_per_bar=None, first_downbeat=0.0),
     )
+    original_times = _note_times(midi)
     buf = io.BytesIO()
     midi.save(file=buf)
 
@@ -62,6 +63,7 @@ def test_rewrite_midi_tempo_updates_all_tempo_events():
     assert {m.tempo for m in _metas(rewritten, "set_tempo")} == {
         round(60_000_000 / 133.5)
     }
+    assert _note_times(rewritten) == pytest.approx(original_times, abs=0.002)
 
 
 def test_notes_to_midi_empty_notes():
