@@ -259,6 +259,7 @@ def _run_stream(scripts, tokenizer, *, seek_times, batch_size=1, prelude_forcing
 
     fake = SimpleNamespace(
         _model=SimpleNamespace(generate=generate),
+        _draft_model=None,
         _tokenizer=tokenizer,
         _device=torch.device("cpu"),
     )

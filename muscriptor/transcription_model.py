@@ -25,7 +25,12 @@ from muscriptor.events import (
     ProgressEvent,
     decode_model_tokens,
 )
-from muscriptor.models.lm import LMModel, TorchAutocast
+from muscriptor.models.lm import EMITTABLE_VOCAB_SIZE, LMModel, TorchAutocast
+from muscriptor.models.speculative import (
+    DEFAULT_DRAFT_K,
+    generate_speculative_greedy,
+    validate_draft_k,
+)
 from muscriptor.modules.conditioners import (
     ClassConditioner,
     ConditioningAttributes,
@@ -229,6 +234,48 @@ def _build_model(device: torch.device, cfg: _ModelConfig = _DEFAULT_CONFIG) -> L
     return model
 
 
+def _load_lm(
+    weights_path: str | Path | None,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> LMModel:
+    source = _resolve_source(weights_path)
+    resolved_path = download_if_necessary(source)
+    model = _build_model(device, _resolve_config(source, resolved_path))
+    model.eval()
+
+    state_dict = load_file(resolved_path, device=str(device))
+    state_dict = _remap_single_codebook_keys(state_dict)
+    model.load_state_dict(state_dict)
+    model.to(device)
+    if dtype != torch.float32:
+        model.to(dtype)
+        # Conditioners keep fp32 numerics (log-mel of quiet passages
+        # underflows in fp16); LMModel.forward casts their outputs.
+        model.condition_provider.float()
+    return model
+
+
+def _validate_speculative_request(
+    draft_model: LMModel | None,
+    *,
+    use_sampling: bool,
+    cfg_coef: float,
+    batch_size: int,
+    beam_size: int,
+) -> None:
+    if draft_model is None:
+        return
+    if use_sampling:
+        raise ValueError("speculative decoding requires greedy decoding")
+    if cfg_coef != 1.0:
+        raise ValueError("speculative decoding requires cfg_coef=1.0")
+    if batch_size != 1:
+        raise ValueError("speculative decoding requires batch_size=1")
+    if beam_size != 1:
+        raise ValueError("speculative decoding requires beam_size=1")
+
+
 def _build_instrument_for_program(tokenizer: MT3Tokenizer) -> Callable[[int], str]:
     """Map a decoded program int → human-readable instrument name.
 
@@ -239,7 +286,7 @@ def _build_instrument_for_program(tokenizer: MT3Tokenizer) -> Callable[[int], st
     group_map = tokenizer.group_program_map
     program_to_name: dict[int, str] = {}
     for name, gid in MT3_FULL_PLUS_GROUP_NAMES.items():
-        if gid in group_map and group_map[gid]:
+        if group_map.get(gid):
             program_to_name[group_map[gid][0]] = name
 
     def lookup(program: int) -> str:
@@ -264,8 +311,30 @@ class TranscriptionModel:
         Path("out.mid").write_bytes(model.transcribe_and_postprocess("audio.wav")[0])
     """
 
-    def __init__(self, model: LMModel, tokenizer: MT3Tokenizer, device: torch.device):
+    def __init__(
+        self,
+        model: LMModel,
+        tokenizer: MT3Tokenizer,
+        device: torch.device,
+        *,
+        draft_model: LMModel | None = None,
+        speculative_k: int = DEFAULT_DRAFT_K,
+    ):
+        validate_draft_k(speculative_k)
+        if draft_model is None and speculative_k != DEFAULT_DRAFT_K:
+            raise ValueError("speculative_k requires a draft model")
+        if draft_model is not None:
+            if draft_model.emb.weight.device != model.emb.weight.device:
+                raise ValueError("target and draft models must use the same device")
+            required_card = EMITTABLE_VOCAB_SIZE
+            if model.card < required_card or draft_model.card < required_card:
+                raise ValueError(
+                    "target and draft checkpoints must cover the shared output "
+                    f"vocabulary ({required_card} tokens)"
+                )
         self._model = model
+        self._draft_model = draft_model
+        self._speculative_k = speculative_k if draft_model is not None else None
         self._tokenizer = tokenizer
         self._device = device
         self._instrument_for_program = _build_instrument_for_program(tokenizer)
@@ -276,6 +345,9 @@ class TranscriptionModel:
         weights_path: str | Path | None = None,
         device: str | torch.device | None = None,
         dtype: str | torch.dtype | None = None,
+        *,
+        draft_weights_path: str | Path | None = None,
+        speculative_k: int = DEFAULT_DRAFT_K,
     ) -> "TranscriptionModel":
         """Load model weights and return a ready-to-use TranscriptionModel.
 
@@ -294,6 +366,12 @@ class TranscriptionModel:
                 compute via autocast instead). The conditioning pipeline
                 (mel-spectrogram/class embeddings) always stays in fp32; its
                 outputs are cast at the transformer boundary.
+            draft_weights_path: Optional checkpoint used to propose tokens for
+                target-model verification during greedy decoding.
+            speculative_k: Number of draft tokens proposed per target block.
+                Supported values are 1 through 4. It only has an effect with
+                ``draft_weights_path``; a non-default value without a draft is
+                rejected.
         """
         if device is None:
             device = (
@@ -309,27 +387,27 @@ class TranscriptionModel:
         elif isinstance(dtype, str):
             dtype = getattr(torch, dtype)
 
-        source = _resolve_source(weights_path)
-        weights_path = download_if_necessary(source)
-        model = _build_model(device, _resolve_config(source, weights_path))
-        model.eval()
+        validate_draft_k(speculative_k)
+        if draft_weights_path is None and speculative_k != DEFAULT_DRAFT_K:
+            raise ValueError("speculative_k requires draft_weights_path")
 
-        state_dict = load_file(weights_path, device=str(device))
-        state_dict = _remap_single_codebook_keys(state_dict)
-        model.load_state_dict(state_dict)
-        model.to(device)
-        if dtype != torch.float32:
-            model.to(dtype)
-            # Conditioners keep fp32 numerics (log-mel of quiet passages
-            # underflows in fp16); LMModel.forward casts their outputs.
-            model.condition_provider.float()
+        model = _load_lm(weights_path, device, dtype)
+        draft_model = None
+        if draft_weights_path is not None:
+            draft_model = _load_lm(draft_weights_path, device, dtype)
 
         tokenizer = MT3Tokenizer(
             instrument_vocabulary="MT3_FULL_PLUS",
             max_shift_steps=1001,
         )
 
-        return cls(model=model, tokenizer=tokenizer, device=device)
+        return cls(
+            model=model,
+            tokenizer=tokenizer,
+            device=device,
+            draft_model=draft_model,
+            speculative_k=speculative_k,
+        )
 
     # ------------------------------------------------------------------
     def transcribe(
@@ -377,6 +455,13 @@ class TranscriptionModel:
         only care about notes can ignore them.
         """
         batch_size = self._resolve_batch_size(batch_size, prelude_forcing)
+        _validate_speculative_request(
+            self._draft_model,
+            use_sampling=use_sampling,
+            cfg_coef=cfg_coef,
+            batch_size=batch_size,
+            beam_size=beam_size,
+        )
 
         # Exact names only here — the CLI resolves abbreviations before
         # calling in (resolve_instrument_names).
@@ -557,19 +642,35 @@ class TranscriptionModel:
                     )
             yield bnd
 
-            for step in self._model.generate(
-                prompt=prompt,
-                conditions=batch_conditions,
-                max_gen_len=max_gen_len,
-                use_sampling=use_sampling,
-                temp=temperature,
-                top_k=0,
-                top_p=0.0,
-                cfg_coef=cfg_coef,
-                early_stop_on_token=eos_id,
-                beam_size=beam_size,
-                forbidden_tokens=forbidden_tokens,
-            ):
+            draft_model = self._draft_model
+            if draft_model is None:
+                steps = self._model.generate(
+                    prompt=prompt,
+                    conditions=batch_conditions,
+                    max_gen_len=max_gen_len,
+                    use_sampling=use_sampling,
+                    temp=temperature,
+                    top_k=0,
+                    top_p=0.0,
+                    cfg_coef=cfg_coef,
+                    early_stop_on_token=eos_id,
+                    beam_size=beam_size,
+                    forbidden_tokens=forbidden_tokens,
+                )
+            else:
+                assert self._speculative_k is not None
+                steps = generate_speculative_greedy(
+                    self._model,
+                    draft_model,
+                    prompt=prompt,
+                    conditions=batch_conditions,
+                    max_gen_len=max_gen_len,
+                    early_stop_on_token=eos_id,
+                    forbidden_tokens=forbidden_tokens,
+                    draft_k=self._speculative_k,
+                )
+
+            for step in steps:
                 row = step.tolist()  # one token per chunk: [n]
                 for j in range(n):
                     if done[j]:
@@ -756,7 +857,7 @@ class TranscriptionModel:
             self._inst_to_program = {
                 name: group_map[gid][0]
                 for name, gid in MT3_FULL_PLUS_GROUP_NAMES.items()
-                if gid in group_map and group_map[gid]
+                if group_map.get(gid)
             }
         if instrument in self._inst_to_program:
             return self._inst_to_program[instrument]

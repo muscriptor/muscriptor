@@ -161,6 +161,7 @@ def _forbidden_tokens_used_by_transcribe(instruments, tokenizer):
     captured = {}
 
     class _Fake:
+        _draft_model = None
         _device = torch.device("cpu")
         _tokenizer = tokenizer
         _instrument_for_program = staticmethod(lambda program: "x")

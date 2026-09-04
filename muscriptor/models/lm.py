@@ -11,9 +11,10 @@ import torch
 from torch import nn
 
 import muscriptor.accelerator
+import muscriptor.utils.sampling as utils
 from muscriptor.modules.conditioners import (
-    ConditioningProvider,
     ConditioningAttributes,
+    ConditioningProvider,
     ConditionType,
     nullify_all_conditions,
 )
@@ -23,11 +24,12 @@ from muscriptor.modules.streaming import (
     init_states,
 )
 from muscriptor.modules.transformer import StreamingTransformer
-import muscriptor.utils.sampling as utils
-
 
 logger = logging.getLogger(__name__)
 ConditionTensors = dict[str, ConditionType]
+# IDs at and above this boundary are model-control slots, not emitted MT3
+# events. Published target and draft checkpoints share IDs 0..1392.
+EMITTABLE_VOCAB_SIZE = 1393
 
 
 # ---------------------------------------------------------------------------
@@ -160,7 +162,7 @@ class LMModel(nn.Module):
         first_step: bool = False,
         model_state: ModelState | None = None,
     ) -> torch.Tensor:  # [B, S, card]
-        B, S = sequence.shape
+        _, S = sequence.shape
 
         input_ = self.emb(sequence)  # [B, S, D]
 
@@ -224,7 +226,7 @@ class LMModel(nn.Module):
             logits = uncond_logits + (cond_logits - uncond_logits) * cfg_coef
 
         logits = logits[:, -1, :].float()  # [B, card] — last timestep
-        logits[:, 1393:] = -torch.inf      # mask reserved / OOV tokens
+        logits[:, EMITTABLE_VOCAB_SIZE:] = -torch.inf
         if forbidden_tokens is not None:
             logits[:, forbidden_tokens] = -torch.inf
         return logits
@@ -243,7 +245,11 @@ class LMModel(nn.Module):
         forbidden_tokens: torch.Tensor | None = None,
     ) -> torch.Tensor:  # [B]
         logits = self._compute_logits(
-            sequence, cfg_conditions, model_state, first_step, cfg_coef,
+            sequence,
+            cfg_conditions,
+            model_state,
+            first_step,
+            cfg_coef,
             forbidden_tokens=forbidden_tokens,
         )
         if use_sampling and temp > 0.0:
@@ -261,7 +267,7 @@ class LMModel(nn.Module):
     def generate(
         self,
         prompt: torch.Tensor | None = None,
-        conditions: list[ConditioningAttributes] = [],
+        conditions: list[ConditioningAttributes] | None = None,
         num_samples: int | None = None,
         max_gen_len: int = 256,
         use_sampling: bool = True,
@@ -284,8 +290,12 @@ class LMModel(nn.Module):
         every step, so they can never be sampled (greedy, sampling or beam).
         """
         assert not self.training
+        if conditions is None:
+            conditions = []
         if beam_size > 1:
-            assert early_stop_on_token is not None, "beam search requires early_stop_on_token"
+            assert early_stop_on_token is not None, (
+                "beam search requires early_stop_on_token"
+            )
         device = self.emb.weight.device
 
         if forbidden_tokens is not None and not isinstance(
@@ -432,8 +442,11 @@ class LMModel(nn.Module):
                 else:
                     # ── Beam search step ──────────────────────────────────
                     logits = self._compute_logits(
-                        input_, cfg_conditions, model_state,
-                        first_step=first_iter, cfg_coef=cfg_coef,
+                        input_,
+                        cfg_conditions,
+                        model_state,
+                        first_step=first_iter,
+                        cfg_coef=cfg_coef,
                         forbidden_tokens=forbidden_tokens,
                     )  # [eff_batch, card]
                     input_T = input_.shape[-1]
@@ -446,14 +459,17 @@ class LMModel(nn.Module):
                     log_probs = torch.log_softmax(logits.float(), dim=-1)
 
                     # Top beam_size candidate tokens per current beam
-                    topk_scores, topk_tokens = torch.topk(log_probs, k=beam_size, dim=-1)
+                    topk_scores, topk_tokens = torch.topk(
+                        log_probs, k=beam_size, dim=-1
+                    )
 
                     # Track which beams have already emitted EOS
                     eos_mask = gen_sequence == early_stop_on_token
                     beam_has_ended = eos_mask.any(dim=-1)
                     eos_pos = eos_mask.int().argmax(dim=-1).clamp(min=1)
                     beam_lengths = torch.where(
-                        beam_has_ended, eos_pos,
+                        beam_has_ended,
+                        eos_pos,
                         torch.full_like(eos_pos, offset + 1),
                     )
 
@@ -488,8 +504,10 @@ class LMModel(nn.Module):
 
                     # Map to global row indices in [eff_batch, …] tensors
                     sample_base = (
-                        torch.arange(num_samples, device=device)
-                        .repeat_interleave(beam_size) * beam_size
+                        torch.arange(num_samples, device=device).repeat_interleave(
+                            beam_size
+                        )
+                        * beam_size
                     )
                     prev_global = sample_base + prev_local
 
@@ -507,14 +525,18 @@ class LMModel(nn.Module):
                         if "cache" in state:
                             cache = state["cache"]
                             if cache.shape[1] == 2 * eff_batch:  # CFG-doubled cache
-                                reorder = torch.cat([prev_global, prev_global + eff_batch])
+                                reorder = torch.cat(
+                                    [prev_global, prev_global + eff_batch]
+                                )
                             else:
                                 reorder = prev_global
                             state["cache"] = cache[:, reorder, :, :, :]
 
                     # Write next token (respecting pre-filled prompt positions)
                     this_step = gen_sequence[:, offset + 1]
-                    next_token = torch.where(this_step == ungenerated, next_token, this_step)
+                    next_token = torch.where(
+                        this_step == ungenerated, next_token, this_step
+                    )
                     gen_sequence[:, offset + 1] = next_token
 
                     # Early stop when every beam in every sample has emitted EOS

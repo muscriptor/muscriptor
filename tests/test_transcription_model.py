@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+import muscriptor.transcription_model as transcription_model_module
 from muscriptor.events import ChunkBoundary, ProgressEvent
 from muscriptor.transcription_model import TranscriptionModel
 from muscriptor.utils.beats import BeatDetectionError
@@ -37,6 +38,7 @@ def _run(batches, *, batch_size, seek_times, no_eos_is_ok=False):
 
     fake = SimpleNamespace(
         _model=SimpleNamespace(generate=generate),
+        _draft_model=None,
         _tokenizer=SimpleNamespace(eos_id=EOS),
     )
     conditions = [object()] * len(seek_times)
@@ -88,6 +90,75 @@ def test_single_chunk_streams_token_by_token():
     for expected, count in [(10, 1), (11, 2), (12, 3)]:
         assert next(it) == expected
         assert len(pulled) == count
+
+
+def test_configured_draft_model_uses_speculative_generation(monkeypatch):
+    calls = []
+
+    def scalar_generate(**kwargs):
+        yield torch.tensor([20])
+        yield torch.tensor([EOS])
+
+    def speculative_generate(target, draft, **kwargs):
+        calls.append((target, draft, kwargs["draft_k"]))
+        yield torch.tensor([10])
+        yield torch.tensor([EOS])
+
+    target = SimpleNamespace(generate=scalar_generate)
+    draft = object()
+    fake = SimpleNamespace(
+        _model=target,
+        _draft_model=draft,
+        _speculative_k=4,
+        _tokenizer=SimpleNamespace(eos_id=EOS),
+    )
+    monkeypatch.setattr(
+        transcription_model_module,
+        "generate_speculative_greedy",
+        speculative_generate,
+    )
+
+    stream = list(
+        TranscriptionModel._generate_token_stream(
+            fake,
+            [object()],
+            [0.0],
+            batch_size=1,
+            max_gen_len=64,
+            use_sampling=False,
+            temperature=1.0,
+            cfg_coef=1.0,
+            no_eos_is_ok=False,
+            prelude_forcing=False,
+        )
+    )
+
+    assert (stream, calls) == (
+        [ChunkBoundary(0.0, None), 10, ProgressEvent(completed=1, total=1)],
+        [(target, draft, 4)],
+    )
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"use_sampling": True}, "greedy decoding"),
+        ({"cfg_coef": 2.0}, "cfg_coef=1.0"),
+        ({"batch_size": 2, "prelude_forcing": False}, "batch_size=1"),
+        ({"beam_size": 2}, "beam_size=1"),
+    ],
+)
+def test_unsupported_speculative_request_is_rejected_before_audio_load(kwargs, message):
+    class _Fake:
+        _draft_model = object()
+        _resolve_batch_size = TranscriptionModel._resolve_batch_size
+        _device = torch.device("cpu")
+
+        def _load_wav(self, *args):
+            raise AssertionError("audio must not be loaded")
+
+    with pytest.raises(ValueError, match=message):
+        list(TranscriptionModel.transcribe(_Fake(), "unused.wav", **kwargs))
 
 
 # ---------------------------------------------------------------------------

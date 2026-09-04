@@ -142,6 +142,30 @@ weights are downloaded and cached automatically. The architecture is a transform
 speed/accuracy trade-off, and `large` is the most accurate but really wants a
 GPU. On Apple Silicon the model runs on Metal (MPS) automatically.
 
+### Experimental speculative decoding
+
+Greedy decoding with `large` can use `small` as a draft model to reduce
+decoding time:
+
+```bash
+uvx muscriptor transcribe audio.wav \
+  --model large \
+  --draft-model small
+```
+
+`--speculative-k` controls the proposal length (1–4; default: 2). For Python,
+pass `draft_weights_path` and `speculative_k` to
+`TranscriptionModel.load_model()`.
+
+This mode requires greedy decoding, CFG 1, batch size 1, and beam size 1. It
+loads both models on the same device, so it uses more memory.
+
+Output and speed depend on the device, dtype, input, and K. It matched ordinary
+greedy decoding on our MPS/float16 test corpus, although sparse audio can be
+slower. CUDA with explicit float16 weights produced different tokens in our T4
+tests, so do not use that combination when exact equivalence is required. Other
+configurations remain experimental.
+
 ## Developing
 
 To set up for development, get [uv](https://docs.astral.sh/uv/getting-started/installation/),
