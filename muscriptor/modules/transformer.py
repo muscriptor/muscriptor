@@ -1,6 +1,5 @@
 """Causal streaming transformer for muscriptor inference."""
 
-from einops import rearrange
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
@@ -47,9 +46,10 @@ class StreamingMultiheadAttention(StatefulModule):
     def init_state(self, batch_size: int, sequence_length: int) -> State:
         weight = self.in_proj_weight
         return {
-            "cache": torch.full(
+            # Forward writes each cache slice before exposing only the written
+            # prefix, so initializing the unread tail would be wasted work.
+            "cache": torch.empty(
                 (2, batch_size, sequence_length, self.num_heads, self.dim_per_head),
-                float("nan"),
                 device=weight.device,
                 dtype=weight.dtype,
             ),
@@ -62,14 +62,17 @@ class StreamingMultiheadAttention(StatefulModule):
     def increment_step(self, state: State, increment: int = 1) -> None:
         state["offset"] = state["offset"] + increment
 
-    def _complete_kv(self, k, v, state: State | None):
+    def _complete_kv(self, kv, state: State | None):
         if state is None:
-            return k, v
+            return kv[0], kv[1]
         cache = state["cache"]
         end = state["offset"]
-        T = k.shape[1]
-        cache[0, :, end : end + T] = k
-        cache[1, :, end : end + T] = v
+        T = kv.shape[2]
+        if T == 1:
+            cache[:, :, end : end + T] = kv
+        else:
+            cache[0, :, end : end + T] = kv[0]
+            cache[1, :, end : end + T] = kv[1]
         return cache[0, :, : end + T], cache[1, :, : end + T]
 
     def forward(
@@ -79,10 +82,12 @@ class StreamingMultiheadAttention(StatefulModule):
     ):
         state = self.get_state(model_state)
         projected = nn.functional.linear(query, self.in_proj_weight)
-        packed = rearrange(projected, "b t (p h d) -> b t p h d", p=3, h=self.num_heads)
-        q, k, v = packed.unbind(dim=2)
+        B, T, _ = projected.shape
+        packed = projected.reshape(B, T, 3, self.num_heads, self.dim_per_head)
+        q = packed[:, :, 0]
+        kv = packed[:, :, 1:].permute(2, 0, 1, 3, 4)
 
-        k, v = self._complete_kv(k, v, state)
+        k, v = self._complete_kv(kv, state)
         dtype = q.dtype
 
         q_t = q.transpose(1, 2)
@@ -113,7 +118,7 @@ class StreamingMultiheadAttention(StatefulModule):
             )
         x = x.transpose(1, 2).to(dtype)
 
-        x = rearrange(x, "b t h d -> b t (h d)")
+        x = x.reshape(B, T, self.embed_dim)
         x = self.out_proj(x)
         return x
 
