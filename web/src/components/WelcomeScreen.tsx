@@ -8,6 +8,8 @@ import {
 import clsx from "clsx";
 import { Button } from "./Button";
 import { ConditioningPanel } from "./ConditioningPanel";
+import { WaveformEditor } from "./WaveformEditor";
+import type { AudioEdit } from "../audio-edit";
 import type { AppError, SubmitState } from "../App";
 
 const SERVER_DOWN = "The muscriptor server is temporarily unavailable.";
@@ -27,7 +29,10 @@ function useCountdown(at: number | null): number | null {
 
 /** Label for the CTA, which doubles as the status readout while an upload is
  *  waiting to be accepted (see `SubmitState`). */
-function transcribeLabel(submitState: SubmitState, retryIn: number | null): string {
+function transcribeLabel(
+  submitState: SubmitState,
+  retryIn: number | null,
+): string {
   if (submitState.phase === "submitting") return "Transcribing…";
   if (submitState.phase === "busy") {
     return retryIn === null || retryIn === 0
@@ -49,6 +54,7 @@ export function WelcomeScreen(props: {
   onUseExample: () => Promise<void>;
   condSelected: Set<string>;
   onCondChange: (next: Set<string>) => void;
+  setEdit: (edit: AudioEdit | null) => void;
   onTranscribe: () => void;
   /** Where the submitted upload stands; drives the CTA's label + disabled state
    *  (the screen stays put until the server accepts it). */
@@ -67,6 +73,7 @@ export function WelcomeScreen(props: {
     onUseExample,
     condSelected,
     onCondChange,
+    setEdit,
     onTranscribe,
     submitState,
     onCancelSubmit,
@@ -76,7 +83,9 @@ export function WelcomeScreen(props: {
   } = props;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [loadingExample, setLoadingExample] = useState(false);
-  const retryIn = useCountdown(submitState.phase === "busy" ? submitState.retryAt : null);
+  const retryIn = useCountdown(
+    submitState.phase === "busy" ? submitState.retryAt : null,
+  );
   const submitting = submitState.phase !== "idle";
 
   // Probe the server on mount. A failure swaps the file picker for a
@@ -116,8 +125,8 @@ export function WelcomeScreen(props: {
     <main className="mx-auto flex max-w-3xl flex-col gap-4 px-7 pb-12 pt-2 animate-rise [animation-delay:0.06s]">
       <p className="text-base leading-relaxed text-muted">
         MuScriptor is the best open model for multi-instrument transcription to
-        date. Give it a recording: pop, classical, metal, jazz, whatever, and
-        it transcribes the notes played by every instrument into MIDI and sheet
+        date. Give it a recording: pop, classical, metal, jazz, whatever, and it
+        transcribes the notes played by every instrument into MIDI and sheet
         music, for you to download or explore interactively.
       </p>
       {/* Explicit extensions alongside the wildcard, needed for iOS Safari
@@ -148,12 +157,16 @@ export function WelcomeScreen(props: {
             <div className="wave-mark h-16 w-32 bg-accent" aria-hidden="true" />
             <p className="m-0 text-base text-muted">
               {dragging ? (
-                <span className="font-semibold text-content">Drop anywhere</span>
+                <span className="font-semibold text-content">
+                  Drop anywhere
+                </span>
               ) : (
                 <>
                   Drop an{" "}
-                  <strong className="font-semibold text-content">audio file</strong> here,
-                  or
+                  <strong className="font-semibold text-content">
+                    audio file
+                  </strong>{" "}
+                  here, or
                 </>
               )}
             </p>
@@ -197,6 +210,13 @@ export function WelcomeScreen(props: {
 
       {error?.kind !== "server" && selectedFile !== null && (
         <>
+          {/* Keyed on the file so a re-pick decodes from scratch rather than
+              showing the previous track's waveform while it loads. */}
+          <WaveformEditor
+            key={selectedFile.name + selectedFile.size}
+            file={selectedFile}
+            setEdit={setEdit}
+          />
           <ConditioningPanel selected={condSelected} onChange={onCondChange} />
           <div className="flex items-center justify-end gap-5">
             {submitting && (

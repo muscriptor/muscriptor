@@ -26,6 +26,9 @@ importers:
       tone:
         specifier: ^15.1.22
         version: 15.1.22
+      wavesurfer.js:
+        specifier: ^7.12.11
+        version: 7.12.11
     devDependencies:
       '@tailwindcss/vite':
         specifier: ^4.3.2
@@ -454,14 +457,17 @@ packages:
     resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
     engines: {node: '>=0.10.0'}
 
-  spessasynth_core@4.3.12:
-    resolution: {integrity: sha512-4qwT+QoOsgqo+534gN9UTj7Bo0Spo/q4hCoqPXopitbm2VPH09YDORROdBb2jvK8BtZ2G3mptVbJl02v+FHrOw==}
+  spessasynth_core@4.3.20:
+    resolution: {integrity: sha512-RcYCXemGESRKIRbGEAGOwFgNSXcsuLMptjk3BmRTJJWtF6RH4KLRXKkUs6rzREUh3ooInfsJla/sRmWvwZzjhw==}
 
   spessasynth_lib@4.3.8:
     resolution: {integrity: sha512-v5D/XF9DH34FNwVSaoR51URsVxfGTuGSH577ZnmFwHOCo1mWq7b545oliIHxPFkP1OKoAjcp82oQFoqBv5i8pQ==}
 
   standardized-audio-context@25.3.77:
     resolution: {integrity: sha512-Ki9zNz6pKcC5Pi+QPjPyVsD9GwJIJWgryji0XL9cAJXMGyn+dPOf6Qik1AHei0+UNVcc4BOCa0hWLBzlwqsW/A==}
+
+  stb-vorbis@0.0.6:
+    resolution: {integrity: sha512-CyvjJEGROIdnuZknwFvdOfMIO1ssUxO2OawsXCR3IlbJ8z2IMBjDe8FDxFJqBfLgf1ZOdqvoHAYx3Xk8q9rbbg==}
 
   tailwindcss@4.3.2:
     resolution: {integrity: sha512-WtctNNSH8A9jlMIqxzuYumOHU5uGZyRv0Q5svQl+oEPy5w84YpBxdb7MdqyiSPQge5jTJ6zFQLq0PFygdccSBA==}
@@ -530,6 +536,9 @@ packages:
         optional: true
       yaml:
         optional: true
+
+  wavesurfer.js@7.12.11:
+    resolution: {integrity: sha512-Sx0yZIz7jRJ9J9p7UL+pl9y0UQBB6UN/XNo+R7Gy4tCR5xZI9jMyA0dnt1R8TMVSQ4LZ10SeB2HJYQ+dV2dPSA==}
 
 snapshots:
 
@@ -846,17 +855,21 @@ snapshots:
 
   source-map-js@1.2.1: {}
 
-  spessasynth_core@4.3.12: {}
+  spessasynth_core@4.3.20:
+    dependencies:
+      stb-vorbis: 0.0.6
 
   spessasynth_lib@4.3.8:
     dependencies:
-      spessasynth_core: 4.3.12
+      spessasynth_core: 4.3.20
 
   standardized-audio-context@25.3.77:
     dependencies:
       '@babel/runtime': 7.29.7
       automation-events: 7.1.19
       tslib: 2.8.1
+
+  stb-vorbis@0.0.6: {}
 
   tailwindcss@4.3.2: {}
 
@@ -889,3 +902,5 @@ snapshots:
       '@types/node': 25.9.2
       fsevents: 2.3.3
       jiti: 2.7.0
+
+  wavesurfer.js@7.12.11: {}

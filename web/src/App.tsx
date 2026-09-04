@@ -27,6 +27,7 @@ import { track } from "./analytics";
  */
 export type AppError = { kind: "server" | "file"; message: string };
 import { ProgressEstimator, formatClock } from "./progress";
+import { editToWavFile, type AudioEdit } from "./audio-edit";
 
 type Screen = "welcome" | "transcribe";
 
@@ -73,6 +74,8 @@ export function App() {
 
   const [screen, setScreen] = useState<Screen>("welcome");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  // The waveform editor's pending trim/cut, encoded only at submit time.
+  const [audioEdit, setAudioEdit] = useState<AudioEdit | null>(null);
   const [appState, setAppState] = useState<AppState>("idle");
   const [submit, setSubmit] = useState<SubmitState>({ phase: "idle" });
   // Shown on the welcome screen: a server-down notice (set when the /health
@@ -90,7 +93,7 @@ export function App() {
   // True while a file is being dragged over the window. On the welcome screen
   // this swaps the panel's prompt in place instead of showing the overlay.
   const [dragging, setDragging] = useState(false);
-
+  const midiFilenameRef = useRef("transcription.mid");
   // Mirror of the selected conditioning set, read at submit time without
   // re-creating `transcribe` whenever the selection changes.
   const condRef = useRef(condSelected);
@@ -132,17 +135,22 @@ export function App() {
   // happens under a user gesture.
   function startTranscription() {
     if (selectedFile === null || submit.phase !== "idle") return;
+    const audioFile =
+      audioEdit === null
+        ? selectedFile
+        : editToWavFile(selectedFile, audioEdit);
     track("transcription_start", {
       instruments: Array.from(condSelected).sort().join(",") || "(none)",
       instrument_count: condSelected.size,
       is_example: selectedFile.name === EXAMPLE.filename,
       file_type: (selectedFile.name.match(/\.([^./]+)$/)?.[1] ?? "unknown").toLowerCase(),
       file_size_mb: Math.round(selectedFile.size / 1e5) / 10,
+      trimmed: audioEdit !== null,
     });
     // Drop any leftover file error from a previous failed attempt.
     setError(null);
     setSubmit({ phase: "submitting" });
-    transcribe(selectedFile);
+    transcribe(audioFile);
   }
 
   // Give up on a submission that hasn't been accepted yet (in flight, or waiting
@@ -158,6 +166,7 @@ export function App() {
   function pickFile(file: File) {
     if (submit.phase !== "idle") cancelSubmit();
     setSelectedFile(file);
+    setAudioEdit(null);
   }
 
   // Tear down the current transcription (in-flight or finished) and return to
@@ -184,6 +193,7 @@ export function App() {
   function transcribeAnother() {
     if (!window.confirm("Discard this transcription and start over?")) return;
     setSelectedFile(null);
+    setAudioEdit(null);
     resetToWelcome();
   }
 
@@ -394,6 +404,7 @@ export function App() {
             onUseExample={useExample}
             condSelected={condSelected}
             onCondChange={setCondSelected}
+            setEdit={setAudioEdit}
             onTranscribe={startTranscription}
             submitState={submit}
             onCancelSubmit={cancelSubmit}
