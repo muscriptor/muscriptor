@@ -28,6 +28,12 @@ services:
 
       - "--accesslog=true"
       - "--accesslog.format=json"
+
+      # Traefik v3 defaults readTimeout to 60s, which covers reading the whole
+      # request body. Uploads to /transcribe that take longer than that (big
+      # files, slow connections) were being aborted with a 502 before ever
+      # reaching the backend. The largest upload seen so far is ~360MB.
+      - "--entrypoints.websecure.transport.respondingTimeouts.readTimeout=30m"
     healthcheck:
       test: ["CMD", "traefik", "healthcheck", "--ping"]
     ports:
