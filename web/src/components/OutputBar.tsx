@@ -63,6 +63,11 @@ export function OutputBar(props: {
   const menuRef = useRef<HTMLDivElement>(null);
   const ready = result !== null;
 
+  useEffect(() => {
+    setSheets(null);
+    setSheetsOpen(false);
+  }, [result?.url]);
+
   // Dismiss the download menu on outside click / Escape.
   useEffect(() => {
     if (!menuOpen) return;

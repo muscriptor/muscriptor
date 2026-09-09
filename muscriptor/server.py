@@ -49,6 +49,7 @@ from muscriptor.transcription_model import TranscriptionModel
 from muscriptor.utils.audio import _read_non_wav_file, _read_wav_file
 from muscriptor.utils.beats import BeatDetectionError, TempoDetection
 from muscriptor.utils.download import download_if_necessary
+from muscriptor.utils.midi import rewrite_midi_tempo
 from muscriptor.utils.sheets import (
     MuseScoreError,
     MuseScoreNotFoundError,
@@ -425,6 +426,30 @@ def create_app(model: TranscriptionModel, web_dir: str | Path | None = None) -> 
             raise HTTPException(status_code=422, detail=str(e)) from e
         finally:
             release_lock()
+
+        return Response(
+            content=midi_bytes,
+            media_type="audio/midi",
+            headers={"Content-Disposition": 'attachment; filename="result.mid"'},
+        )
+
+    @app.post("/midi/tempo")
+    async def midi_tempo(
+        midi: Annotated[UploadFile, File()],
+        bpm: Annotated[float, Form()],
+    ) -> Response:
+        """Rewrite a MIDI file's tempo map to one constant BPM."""
+        if not 20 <= bpm <= 400:
+            raise HTTPException(
+                status_code=400, detail="bpm must be between 20 and 400"
+            )
+        midi_data = await midi.read()
+        try:
+            midi_bytes = await asyncio.to_thread(rewrite_midi_tempo, midi_data, bpm)
+        except Exception as e:
+            raise HTTPException(
+                status_code=400, detail=f"could not rewrite MIDI tempo: {e}"
+            ) from e
 
         return Response(
             content=midi_bytes,

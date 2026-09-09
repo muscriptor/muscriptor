@@ -48,6 +48,8 @@ export type TranscriptionResult = {
   /** The same notes snapped to the beat grid, which is what sheet music has to
    *  be engraved from; null when there was no grid to snap them to. */
   quantizedMidi: Blob | null;
+  /** Beat grid detected for this MIDI, or a manual BPM-only grid. */
+  beatGrid: BeatGrid | null;
   /** What to call `midi` when it is saved: the uploaded file's name, as .mid. */
   filename: string;
 };
@@ -89,7 +91,7 @@ export interface TranscriptionDeps {
   /** Detected-instrument names, in first-seen order. */
   setInstruments: Dispatch<SetStateAction<string[]>>;
   /** The finished transcription's exports, or null to disable the downloads. */
-  setResult: (result: TranscriptionResult | null) => void;
+  setResult: Dispatch<SetStateAction<TranscriptionResult | null>>;
   /** Source audio file, re-uploaded to /auralize alongside the MIDI. */
   setCurrentFile: (file: File | null) => void;
   setUserScrolled: (v: boolean) => void;
@@ -159,6 +161,7 @@ export function useTranscription(deps: TranscriptionDeps) {
     base64: string,
     quantizedBase64: string | null,
     filename: string,
+    beatGrid: BeatGrid | null,
   ) {
     const midi = midiBlobOf(base64);
     if (midiUrlRef.current !== null) URL.revokeObjectURL(midiUrlRef.current);
@@ -168,7 +171,22 @@ export function useTranscription(deps: TranscriptionDeps) {
       url,
       midi,
       quantizedMidi: quantizedBase64 ? midiBlobOf(quantizedBase64) : null,
+      beatGrid,
       filename,
+    });
+  }
+
+  function replaceResultMidi(
+    midi: Blob,
+    quantizedMidi: Blob | null,
+    beatGrid: BeatGrid | null,
+  ) {
+    setResult((prev) => {
+      if (prev === null) return null;
+      if (midiUrlRef.current !== null) URL.revokeObjectURL(midiUrlRef.current);
+      const url = URL.createObjectURL(midi);
+      midiUrlRef.current = url;
+      return { ...prev, url, midi, quantizedMidi, beatGrid };
     });
   }
 
@@ -262,13 +280,13 @@ export function useTranscription(deps: TranscriptionDeps) {
         if (isStale()) return;
         const ev = raw as StreamedEvent;
         if (ev.type === "transcription_complete") {
-          // Final event: the assembled MIDI file. Enables the download button.
-          setMidi(ev.data, ev.quantized_midi, midiFilename);
           // Tempo came with it — redraw the time grid as bars instead of seconds,
           // and move the notes onto the beats (the MIDI above already has them
           // there), in the roll and in the scheduled playback alike.
           beatGrid = ev.beat_grid ?? null;
-          rollRef.current?.setBeatGrid(beatGrid);
+          // Final event: the assembled MIDI file. Enables the download button.
+          setMidi(ev.data, ev.quantized_midi, midiFilename, beatGrid);
+          rollRef.current?.setBeatGrid(beatGrid, { shiftNotes: true });
           audio.shiftNotes(-(beatGrid?.onset_delay ?? 0));
           continue;
         }
@@ -333,5 +351,5 @@ export function useTranscription(deps: TranscriptionDeps) {
     activeRef.current = null;
   }
 
-  return { transcribe, abort };
+  return { transcribe, abort, replaceResultMidi };
 }

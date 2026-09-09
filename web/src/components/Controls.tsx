@@ -15,9 +15,29 @@ export function Controls(props: {
   /** Whether the roll auto-follows the playhead (toggled off by manual scrolling). */
   following: boolean;
   onToggleFollow: () => void;
+  tempoInput: string;
+  onTempoInputChange: (v: string) => void;
+  onApplyTempo: () => void;
+  tempoDisabled: boolean;
+  tempoBusy: boolean;
+  tempoError: string | null;
 }) {
-  const { audio, clockRef, mix, onMixChange, stereo, onStereoChange, following, onToggleFollow } =
-    props;
+  const {
+    audio,
+    clockRef,
+    mix,
+    onMixChange,
+    stereo,
+    onStereoChange,
+    following,
+    onToggleFollow,
+    tempoInput,
+    onTempoInputChange,
+    onApplyTempo,
+    tempoDisabled,
+    tempoBusy,
+    tempoError,
+  } = props;
   // The transport's state isn't React state (and it can auto-stop at the end),
   // so poll it each frame to keep the toggle button's label in sync.
   const [playing, setPlaying] = useState(false);
@@ -63,6 +83,39 @@ export function Controls(props: {
       >
         0.0s
       </span>
+      <input
+        className={clsx(
+          "h-[38px] w-24 rounded-md border bg-bg px-2.5 font-mono text-sm tabular-nums text-content outline-none transition-colors placeholder:text-faint focus:border-accent",
+          tempoError ? "border-red-400" : "border-line",
+          tempoDisabled && "opacity-45",
+        )}
+        type="text"
+        inputMode="decimal"
+        value={tempoInput}
+        placeholder="BPM"
+        aria-label="Tempo BPM"
+        aria-invalid={tempoError !== null}
+        title={tempoError ?? "Tempo BPM"}
+        disabled={tempoDisabled || tempoBusy}
+        onChange={(e) => onTempoInputChange(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.currentTarget.blur();
+            onApplyTempo();
+          }
+        }}
+      />
+      <Button
+        className="text-content"
+        disabled={tempoDisabled || tempoBusy || tempoInput.trim() === ""}
+        title={tempoError ?? "Apply tempo"}
+        onClick={(e) => {
+          e.currentTarget.blur();
+          onApplyTempo();
+        }}
+      >
+        {tempoBusy ? "Applying" : "Apply"}
+      </Button>
       <label
         className={clsx(
           "ml-auto inline-flex items-center gap-2.5 text-sm text-muted max-[760px]:ml-0",
