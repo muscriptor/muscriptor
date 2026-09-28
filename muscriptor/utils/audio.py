@@ -1,6 +1,9 @@
 """Audio loading and resampling utilities. WAV is handled by the stdlib;
-other formats fall back to `soundfile`."""
+other formats fall back to `soundfile`, then to `ffmpeg` for containers
+libsndfile can't read (AAC/M4A)."""
 
+import subprocess
+import tempfile
 import wave
 from pathlib import Path
 from typing import IO
@@ -54,7 +57,8 @@ def _read_wav_file(source) -> tuple[torch.Tensor, int]:
 
 
 def _read_non_wav_file(source: str | Path | IO[bytes]) -> tuple[torch.Tensor, int]:
-    """Load a non-WAV audio file using `soundfile`.
+    """Load a non-WAV audio file using `soundfile`, falling back to `ffmpeg`
+    for containers libsndfile doesn't support (notably AAC/M4A).
 
     `source` may be a filesystem path or a binary file-like object (e.g. an
     ``io.BytesIO`` of an uploaded file), since libsndfile reads either.
@@ -71,11 +75,47 @@ def _read_non_wav_file(source: str | Path | IO[bytes]) -> tuple[torch.Tensor, in
         ) from e
 
     target = str(source) if isinstance(source, (str, Path)) else source
-    data, sample_rate = sf.read(target, dtype="float32")
+    try:
+        data, sample_rate = sf.read(target, dtype="float32")
+    except Exception:
+        return _read_via_ffmpeg(source)
     if data.ndim == 1:
         data = data[:, None]
     wav = torch.from_numpy(np.ascontiguousarray(data.T))
     return wav, sample_rate
+
+
+def _read_via_ffmpeg(source: str | Path | IO[bytes]) -> tuple[torch.Tensor, int]:
+    """Decode via the `ffmpeg` binary, for containers libsndfile can't read
+    (e.g. AAC/M4A). Transcodes to a temporary WAV file, then reuses
+    `_read_wav_file` so the sample math stays identical either way.
+    """
+    if hasattr(source, "seek"):
+        source.seek(0)
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_out:
+        out_path = tmp_out.name
+    try:
+        cmd = ["ffmpeg", "-y", "-i", "pipe:0" if hasattr(source, "read") else str(source)]
+        cmd += ["-f", "wav", out_path]
+        try:
+            proc = subprocess.run(
+                cmd,
+                input=source.read() if hasattr(source, "read") else None,
+                capture_output=True,
+            )
+        except FileNotFoundError as e:
+            raise RuntimeError(
+                "ffmpeg is required to decode this audio format. "
+                "Install it via your system package manager (e.g. `apt-get install ffmpeg`)."
+            ) from e
+        if proc.returncode != 0:
+            raise ValueError(
+                f"ffmpeg could not decode this audio file: "
+                f"{proc.stderr.decode(errors='replace').strip()}"
+            )
+        return _read_wav_file(out_path)
+    finally:
+        Path(out_path).unlink(missing_ok=True)
 
 
 def resample(
@@ -93,8 +133,9 @@ def load_audio(path: str | Path, target_sr: int = 16000) -> torch.Tensor:
     """Load an audio file and return a mono float32 tensor at target_sr.
 
     PCM WAV files are read with the stdlib `wave` module. Other formats (mp3,
-    flac, ogg, m4a, …) are decoded via `soundfile`. Dispatch is by content, not
-    file extension, so misnamed files (e.g. an MP3 upload saved as .wav) still
+    flac, ogg, …) are decoded via `soundfile`; formats libsndfile can't read
+    (notably AAC/M4A) fall back to `ffmpeg`. Dispatch is by content, not file
+    extension, so misnamed files (e.g. an MP3 upload saved as .wav) still
     load.
 
     Returns:

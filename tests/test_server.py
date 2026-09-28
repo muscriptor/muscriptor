@@ -6,6 +6,8 @@ Uses a fake transcriber so no weights / audio decoding is required.
 import base64
 import io
 import json
+import shutil
+import subprocess
 import threading
 import time
 import wave
@@ -14,6 +16,7 @@ from pathlib import Path
 from unittest.mock import create_autospec
 
 import numpy as np
+import pytest
 from fastapi.testclient import TestClient
 
 import muscriptor.server as server_module
@@ -63,6 +66,30 @@ def _flac_bytes(sample_rate: int = 22050, n_frames: int = 1600) -> bytes:
     buf = io.BytesIO()
     sf.write(buf, np.zeros(n_frames, dtype="float32"), sample_rate, format="FLAC")
     return buf.getvalue()
+
+
+def _m4a_bytes(tmp_path: Path, sample_rate: int = 16000, duration_s: float = 0.1) -> bytes:
+    """Encode a tiny silent mono M4A via ffmpeg (libsndfile can't read AAC,
+    so this exercises the ffmpeg fallback path, not soundfile)."""
+    p = tmp_path / "silent.m4a"
+    subprocess.run(
+        [
+            "ffmpeg",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            f"anullsrc=r={sample_rate}:cl=mono",
+            "-t",
+            str(duration_s),
+            "-c:a",
+            "aac",
+            str(p),
+        ],
+        capture_output=True,
+        check=True,
+    )
+    return p.read_bytes()
 
 
 def _parse_sse(body: str) -> list[dict]:
@@ -252,6 +279,27 @@ def test_transcribe_accepts_non_wav_audio():
     # Decoded by soundfile, not resampled by the server — sample rate preserved.
     assert sr == 22050
     assert tensor.shape[-1] == 1600
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+def test_transcribe_accepts_m4a_audio(tmp_path):
+    """An M4A upload decodes via the ffmpeg fallback (libsndfile can't read
+    AAC) and reaches the model."""
+    import torch
+
+    model = make_model()
+    client = TestClient(create_app(model))
+    resp = client.post(
+        "/transcribe",
+        files={"file": ("clip.m4a", _m4a_bytes(tmp_path, sample_rate=16000), "audio/mp4")},
+    )
+    assert resp.status_code == 200
+    audio = model.transcribe.call_args.args[0]
+    assert isinstance(audio, tuple)
+    tensor, sr = audio
+    assert isinstance(tensor, torch.Tensor)
+    assert sr == 16000
+    assert tensor.shape[-1] > 0
 
 
 def test_transcribe_rejects_undecodable_file():

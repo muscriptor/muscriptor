@@ -27,12 +27,15 @@ ENV UV_COMPILE_BYTECODE=1 \
 WORKDIR /app
 
 # fluidsynth is required at runtime for MIDI auralization (the /auralize endpoint).
+# ffmpeg is the fallback decoder for audio containers libsndfile can't read
+# (notably AAC/M4A uploads) — see muscriptor/utils/audio.py:_read_via_ffmpeg.
 # The rest are what the MuseScore AppImage below needs from the system: its own
 # AppRun substitutes bundled fallbacks for OpenGL/jack/nss/pipewire, but these
 # five it expects to find installed.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         fluidsynth \
+        ffmpeg \
         curl \
         libasound2 \
         libgl1 \
