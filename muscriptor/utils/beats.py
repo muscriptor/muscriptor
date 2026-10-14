@@ -11,7 +11,8 @@ import torch
 
 logger = logging.getLogger(__name__)
 
-# Used to detect songs that don't have a constant tempo (don't use a metronome)
+# Used to detect songs that don't have a constant tempo (don't use a metronome).
+# Those are written with a tempo map that follows the tracked beats instead.
 MAX_TEMPO_RESIDUAL = 0.05
 
 # Fraction of bars that must agree on a beats-per-bar count to write a time
@@ -51,7 +52,7 @@ Onsets = Sequence[float] | np.ndarray
 
 
 class BeatDetectionError(RuntimeError):
-    """No usable beat grid in the audio (too short, or no constant tempo)."""
+    """No usable beat grid in the audio (too short, or too few beats)."""
 
 
 # What to do when the tempo can't be detected: True raises, False doesn't even
@@ -74,7 +75,12 @@ def read_bar_offset(midi) -> float:
 
 @dataclasses.dataclass
 class BeatGrid:
-    """A constant-tempo beat grid detected from audio."""
+    """A beat grid detected from audio.
+
+    `bpm` is the tempo of a straight line through the beats. Whether that line
+    is a fair summary is `steady`: when it is not, the tracked `beats` are the
+    grid, and the MIDI gets a tempo map following them.
+    """
 
     bpm: float
     # None when the meter could not be determined; write no time signature.
@@ -95,6 +101,8 @@ class BeatGrid:
     onset_delay: float | None = None
     # Subdivisions of the beat to use for quantizing the onsets.
     beat_subdivision: int | None = None
+    # Whether the beats fit a constant tempo (see MAX_TEMPO_RESIDUAL).
+    steady: bool = True
 
     @property
     def bar_seconds(self) -> float | None:
@@ -292,8 +300,10 @@ def infer_beats_per_bar(
     """
     if len(downbeats) < 3 or len(beats) < 2:
         return None
-    beat = float(np.median(np.diff(beats)))
-    counts = np.round(np.diff(downbeats) / beat).astype(int)
+    # Counted in tracked beats rather than measured in seconds, so that a bar
+    # holds as many beats whatever the tempo is doing.
+    index = np.abs(np.asarray(downbeats)[:, None] - beats[None, :]).argmin(axis=1)
+    counts = np.diff(index)
     counts = counts[counts >= 2]
     if not len(counts):
         return None
@@ -317,9 +327,10 @@ def detect_grid(
             the bar offset by a beat or two.
         device: Torch device for the beat model.
 
-    Raises BeatDetectionError when the audio is too short or the beats do not
-    fit a constant tempo. An unclear meter is not fatal: the BeatGrid comes back
-    with beats_per_bar=None, since tempo alone is worth writing.
+    Raises BeatDetectionError when the audio is too short or has too few beats.
+    Neither an unclear meter nor a wandering tempo is fatal: the BeatGrid comes
+    back with beats_per_bar=None or steady=False, since the beats alone are
+    worth writing.
     """
     # Imported here, not at module scope: beat_this pulls in torchaudio and soxr,
     # which would slow every CLI invocation that never transcribes anything.
@@ -347,18 +358,14 @@ def detect_grid(
         )
 
     bpm, residual = fit_tempo(beats)
-    beat_seconds = 60.0 / bpm
-    if residual > MAX_TEMPO_RESIDUAL * beat_seconds:
-        raise BeatDetectionError(
-            f"The recording has no fixed tempo (beats deviate {residual * 1000:.0f} ms "
-            f"RMS from a constant {bpm:.1f} BPM)"
-        )
+    steady = residual <= MAX_TEMPO_RESIDUAL * 60.0 / bpm
 
     beats_per_bar = infer_beats_per_bar(beats, downbeats)
     first_downbeat = float(downbeats[0]) if len(downbeats) else float(beats[0])
     logger.info(
-        "detected %.3f BPM, %s, first downbeat %.3fs (beat residual %.1f ms)",
+        "detected %.3f BPM%s, %s, first downbeat %.3fs (beat residual %.1f ms)",
         bpm,
+        "" if steady else " on average, not steady",
         f"{beats_per_bar}/4" if beats_per_bar else "meter unknown",
         first_downbeat,
         residual * 1000,
@@ -368,4 +375,5 @@ def detect_grid(
         beats_per_bar=beats_per_bar,
         first_downbeat=first_downbeat,
         beats=beats,
+        steady=steady,
     )

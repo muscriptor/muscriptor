@@ -82,7 +82,7 @@ export function SheetsDialog(props: {
 
         {!quantized && (
           <div className="border-b border-line bg-accent-2/10 px-5 py-3 text-[13px] text-accent-2">
-            We couldn't find a steady beat in this recording, so the bar lines are guesses.
+            We couldn't find a beat in this recording, so the bar lines are guesses.
             The score may be hard to read.
           </div>
         )}

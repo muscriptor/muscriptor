@@ -82,9 +82,11 @@ See `--help` for all the options.
 
 ### Tempo and quantization
 
-The tempo, time signature and bar lines are detected from the audio and written into the MIDI.
-When the detection is off, or the recording has no steady tempo, you can set them yourself, and
-tidy the notes up for notation software or a DAW grid:
+The beats, time signature and bar lines are detected from the audio and written into the MIDI.
+When the tempo isn't steady (no metronome), the MIDI gets a tempo map that follows the
+performance, so the bar lines stay on the music; `--fixed-tempo` writes one average tempo instead.
+When the detection is off, you can correct it, and tidy the notes up for notation software or a
+DAW grid:
 
 ```bash
 muscriptor transcribe audio.wav --bpm 96 --beats-per-bar 3 --first-downbeat 1.2 \
@@ -96,6 +98,7 @@ muscriptor transcribe audio.wav --bpm 96 --beats-per-bar 3 --first-downbeat 1.2 
 - `--fill-gaps` holds notes until the next one across rests of up to that many beats, which
   notation software such as Guitar Pro would otherwise write out.
 - `--trim-leading-bars` drops the empty bars before the first note.
+- `--beat-scale 2` (or `0.5`) when the detected tempo is half (or double) what it should be.
 
 The web UI has the same settings: the "Tempo & bars" panel and the MIDI download dialog.
 
@@ -126,9 +129,9 @@ This needs **MuseScore 4 or newer** installed separately. Downloads for every
 platform are at [musescore.org/en/download](https://musescore.org/en/download).
 Set `$MUSCRIPTOR_MUSESCORE` if it lives somewhere unusual.
 
-It works best if there is a steady tempo (i.e. playing with a metronome), because
-that allows us to quantize the notes (snap them to a grid) for a cleaner transcription.
-Rubato recordings will work significantly worse.
+It works best if there is a clear beat, because that allows us to quantize the notes (snap
+them to a grid) for a cleaner transcription. Without a steady tempo the score follows the
+performance's tempo changes; rubato recordings will still work noticeably worse.
 
 ## Using from Python
 

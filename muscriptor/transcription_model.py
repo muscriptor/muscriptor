@@ -660,16 +660,17 @@ class TranscriptionModel:
                 prelude_forcing=prelude_forcing,
             )
         )
-        if beat_grid is not None or export.bpm is not None:
-            beat_grid = resolve_grid(
-                beat_grid,
-                export,
-                [ev.start_time for ev in events if isinstance(ev, NoteStartEvent)],
-            )
+        onsets = [ev.start_time for ev in events if isinstance(ev, NoteStartEvent)]
+        if beat_grid is not None:
+            beat_grid = beat_grid.with_onset_delay(onsets)
         midi_bytes = self.events_to_midi_bytes(
             iter(events), beat_grid=beat_grid, export=export
         )
-        return midi_bytes, beat_grid
+        # The MIDI writer resolves the grid itself; this is the same one, for
+        # the caller. resolve_grid must see the detected grid, not its own output.
+        if beat_grid is None and export.bpm is None:
+            return midi_bytes, None
+        return midi_bytes, resolve_grid(beat_grid, export, onsets)
 
     def detect_beat_grid_for(
         self,

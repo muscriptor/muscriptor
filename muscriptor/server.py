@@ -7,10 +7,11 @@ or any format soundfile/libsndfile can read — mp3, flac, ogg, m4a, …) return
 `progress` chunk anchors (`{completed, total}`), and a final
 `transcription_complete` event carrying the base64-encoded .mid file (`data`)
 plus the detected `beat_grid`
-(`{bpm, beats_per_bar, first_downbeat, onset_delay, beat_subdivision}`, or null
-if no tempo was found). `onset_delay` is how late the streamed note times are
-against those beats: the MIDI has it taken out already, an SSE consumer has to
-subtract it.
+(`{bpm, beats_per_bar, first_downbeat, onset_delay, beat_subdivision, steady,
+beats}`, or null if no beats were found). `steady` says whether the tracked
+`beats` fit the constant `bpm`; when not, the MIDI follows them with a tempo
+map. `onset_delay` is how late the streamed note times are against those
+beats: the MIDI has it taken out already, an SSE consumer has to subtract it.
 
 POST /export takes JSON instead: the streamed notes, that `beat_grid`, and
 `options` (`muscriptor.utils.midi.ExportOptions`: tempo/meter/downbeat
@@ -41,8 +42,9 @@ import time
 import wave
 import zipfile
 from pathlib import Path
-from typing import Annotated, Callable
+from typing import Annotated, Callable, Literal
 
+import numpy as np
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -128,6 +130,8 @@ class ExportGrid(BaseModel):
     first_downbeat: float = 0.0
     onset_delay: float = 0.0
     beat_subdivision: int | None = None
+    steady: bool = True
+    beats: list[float] | None = None
 
 
 class ExportSettings(BaseModel):
@@ -136,6 +140,8 @@ class ExportSettings(BaseModel):
     bpm: float | None = Field(default=None, ge=20, le=400)
     beats_per_bar: int | None = Field(default=None, ge=1, le=32)
     first_downbeat: float | None = None
+    tempo_map: bool | None = None
+    beat_scale: Literal[0.25, 0.5, 1, 2, 4] = 1
     quantize: bool = False
     subdivision: int | None = Field(default=None, ge=1, le=32)
     strength: float = Field(default=1.0, ge=0, le=1)
@@ -391,6 +397,12 @@ def create_app(model: TranscriptionModel, web_dir: str | Path | None = None) -> 
                             "onset_delay": grid.onset_delay,
                             # What /export quantizes to unless told otherwise.
                             "beat_subdivision": grid.beat_subdivision,
+                            "steady": grid.steady,
+                            # For the UI to draw bar lines that follow them, and
+                            # to send back to /export.
+                            "beats": None
+                            if grid.beats is None
+                            else [round(float(b), 3) for b in grid.beats],
                         }
                         if grid
                         else None,
@@ -495,11 +507,13 @@ def create_app(model: TranscriptionModel, web_dir: str | Path | None = None) -> 
                 status_code=400,
                 detail=f"unknown instrument name(s): {', '.join(unknown)}",
             )
-        grid = (
-            BeatGrid(**request.beat_grid.model_dump())
-            if request.beat_grid is not None
-            else None
-        )
+        grid = None
+        if request.beat_grid is not None:
+            fields = request.beat_grid.model_dump()
+            beats = fields.pop("beats")
+            grid = BeatGrid(
+                **fields, beats=None if beats is None else np.asarray(beats)
+            )
         midi_bytes = await asyncio.to_thread(
             model.events_to_midi_bytes,
             iter(export_events(request.notes)),

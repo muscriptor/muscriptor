@@ -5,6 +5,7 @@ Adapted from YourMT3+ (https://github.com/mimbres/YourMT3).
 
 import os
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from mido import Message, MetaMessage, MidiFile, MidiTrack, second2tick
@@ -258,6 +259,27 @@ def note2note_event(notes: list[Note]) -> list[NoteEvent]:
     return note_events
 
 
+def _append_tempo_changes(
+    track: MidiTrack,
+    tempo_changes: list[tuple[int, int]],
+    messages: list[tuple[int, Message]],
+) -> None:
+    """Append `messages` to `track` with `tempo_changes` woven in, as deltas.
+
+    Both are (absolute tick, ...) and in order; a tempo change goes before the
+    notes on its tick, which is the tempo they start at.
+    """
+    timeline = sorted(
+        [(tick, 0, MetaMessage("set_tempo", tempo=t)) for tick, t in tempo_changes]
+        + [(tick, 1, msg) for tick, msg in messages],
+        key=lambda item: (item[0], item[1]),
+    )
+    last = 0
+    for tick, _, msg in timeline:
+        track.append(msg.copy(time=tick - last))
+        last = tick
+
+
 def note_event2midi(
     note_events: list[NoteEvent],
     output_file: str | os.PathLike | None = None,
@@ -267,6 +289,9 @@ def note_event2midi(
     program_names: dict[int, str] | None = None,
     beats_per_bar: int | None = None,
     offset_s: float = 0.0,
+    to_tick: Callable[[float], int] | None = None,
+    tempo_changes: list[tuple[int, int]] | None = None,
+    drum_length: float = 0.01,
 ) -> MidiFile:
     """Convert NoteEvent list to a type-1 (multi-track) MIDI file.
 
@@ -280,11 +305,23 @@ def note_event2midi(
     track name; unmapped programs fall back to "program <n>" / "drums".
 
     `beats_per_bar` writes a time signature (denominator 4).
-    `offset_s` delays every event so bar lines land on real downbeats.
+    `offset_s` is recorded in a marker as the playback time at which the
+    original audio starts (see BAR_OFFSET_MARKER).
+
+    By default event times are seconds, written at the constant `tempo` and
+    delayed by `offset_s`. A caller with a tempo map passes `to_tick`, mapping
+    event times (in whatever unit, drum hits lasting `drum_length` of it) to
+    ticks, and `tempo_changes` as (tick, microseconds per beat) pairs.
     """
+    if to_tick is None:
+
+        def to_tick(time: float) -> int:
+            return round(second2tick(time + offset_s, ticks_per_beat, tempo))
+
+    tempo_changes = tempo_changes or [(0, tempo)]
+
     midi = MidiFile(ticks_per_beat=ticks_per_beat, type=1)
     meta_track = MidiTrack()
-    meta_track.append(MetaMessage("set_tempo", tempo=tempo, time=0))
     if beats_per_bar is not None:
         meta_track.append(
             MetaMessage(
@@ -297,6 +334,7 @@ def note_event2midi(
         meta_track.append(
             MetaMessage("marker", text=f"{BAR_OFFSET_MARKER}{offset_s:.4f}", time=0)
         )
+    _append_tempo_changes(meta_track, tempo_changes, [])
     midi.tracks.append(meta_track)
 
     drum_offset_events = []
@@ -306,7 +344,7 @@ def note_event2midi(
                 NoteEvent(
                     is_drum=True,
                     program=ne.program,
-                    time=ne.time + 0.01,
+                    time=ne.time + drum_length,
                     pitch=ne.pitch,
                     velocity=0,
                 )
@@ -317,11 +355,11 @@ def note_event2midi(
     program_names = program_names or {}
     program_to_channel: dict[int, int] = {}
     available_channels = list(range(0, 9)) + list(range(10, 16))
-    tracks: dict[int, MidiTrack] = {}
-    track_ticks: dict[int, int] = {}
+    # Each track's note messages at their absolute ticks; deltas come last.
+    tracks: dict[int, list[tuple[int, Message]]] = {}
     current_tick = 0
     for ne in note_events:
-        absolute_tick = round(second2tick(ne.time + offset_s, ticks_per_beat, tempo))
+        absolute_tick = to_tick(ne.time)
         if absolute_tick < current_tick:
             raise ValueError(
                 f"at ne.time {ne.time}, absolute_tick {absolute_tick} < current_tick {current_tick}"
@@ -330,47 +368,45 @@ def note_event2midi(
 
         key = DRUM_PROGRAM if (ne.is_drum or ne.program == DRUM_PROGRAM) else ne.program
         if key not in tracks:
-            track = MidiTrack()
-            midi.tracks.append(track)
-            tracks[key] = track
-            track_ticks[key] = 0
+            tracks[key] = []
             if key == DRUM_PROGRAM:
                 ne_channel = 9
-                name = program_names.get(key, "drums")
-                gm_program = 0
             else:
                 try:
                     ne_channel = available_channels.pop(0)
                 except IndexError:
                     ne_channel = 15
-                name = program_names.get(key, f"program {key}")
-                gm_program = ne.program
             program_to_channel[key] = ne_channel
-            track.append(MetaMessage("track_name", name=name, time=0))
-            # MuseScore ignores set_tempo in a conductor track that has no notes,
-            # so repeat it here. Harmless for hosts that read the meta track.
-            track.append(MetaMessage("set_tempo", tempo=tempo, time=0))
-            track.append(
-                Message(
-                    "program_change", program=gm_program, time=0, channel=ne_channel
-                )
-            )
-        track = tracks[key]
         ne_channel = program_to_channel[key]
-        delta_tick = absolute_tick - track_ticks[key]
-        track_ticks[key] = absolute_tick
 
         msg_note = "note_on" if ne.velocity > 0 else "note_off"
         msg_velocity = velocity if ne.velocity > 0 else 0
-        track.append(
-            Message(
-                msg_note,
-                note=ne.pitch,
-                velocity=msg_velocity,
-                time=delta_tick,
-                channel=ne_channel,
+        tracks[key].append(
+            (
+                absolute_tick,
+                Message(
+                    msg_note, note=ne.pitch, velocity=msg_velocity, channel=ne_channel
+                ),
             )
         )
+
+    for key, messages in tracks.items():
+        track = MidiTrack()
+        midi.tracks.append(track)
+        ne_channel = program_to_channel[key]
+        if key == DRUM_PROGRAM:
+            name = program_names.get(key, "drums")
+            gm_program = 0
+        else:
+            name = program_names.get(key, f"program {key}")
+            gm_program = key
+        track.append(MetaMessage("track_name", name=name, time=0))
+        track.append(
+            Message("program_change", program=gm_program, time=0, channel=ne_channel)
+        )
+        # MuseScore ignores set_tempo in a conductor track that has no notes,
+        # so repeat the tempo here. Harmless for hosts that read the meta track.
+        _append_tempo_changes(track, tempo_changes, messages)
 
     if output_file is not None:
         midi.save(output_file)

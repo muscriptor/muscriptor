@@ -246,3 +246,9 @@ def test_read_bar_offset():
     assert read_bar_offset(_FakeMidi([])) == 0.0
     assert read_bar_offset(_FakeMidi(["some other marker"])) == 0.0
     assert read_bar_offset(_FakeMidi([f"{BAR_OFFSET_MARKER}nonsense"])) == 0.0
+
+
+def test_infer_beats_per_bar_counts_beats_through_tempo_changes():
+    """Bars of a song that speeds up are shorter in seconds, not in beats."""
+    beats = _beats(96.0, n=97, drift=0.3)
+    assert infer_beats_per_bar(beats, beats[::4]) == 4

@@ -26,7 +26,7 @@ type EndEvent = {
 type TranscriptionCompleteEvent = {
   type: "transcription_complete";
   data: string; // base64-encoded .mid file
-  beat_grid: BeatGrid | null; // null when no constant tempo was detected
+  beat_grid: BeatGrid | null; // null when no beats were detected
 };
 type ProgressMsg = {
   type: "progress";
@@ -45,7 +45,7 @@ export type TranscriptionResult = {
   midi: Blob;
   /** Every note as streamed, for /export to write out with other options. */
   notes: ExportNote[];
-  /** The detected grid, null when no constant tempo was found. */
+  /** The detected grid, null when no beats were found. */
   beatGrid: BeatGrid | null;
   /** What to call an exported MIDI: the uploaded file's name, as .mid. */
   filename: string;
@@ -284,6 +284,7 @@ export function useTranscription(deps: TranscriptionDeps) {
         detected_count: knownRef.current.size,
         note_count: noteCount,
         tempo_detected: beatGrid !== null,
+        tempo_steady: beatGrid ? beatGrid.steady !== false : undefined,
         bpm: beatGrid ? Math.round(beatGrid.bpm) : undefined,
         // Bucketed and reported as string so that we can also have (in Google Analytics terms)
         // a "dimension" and not just a "metric" to average

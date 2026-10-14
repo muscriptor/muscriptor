@@ -116,6 +116,8 @@ export function MidiExportDialog(props: {
       fill_gaps: options.fill_gaps,
       trim_leading_bars: options.trim_leading_bars,
       tempo_changed: timing.bpm !== null,
+      tempo_map: grid?.steady === false,
+      beat_scale: timing.beat_scale,
       meter_changed: timing.beats_per_bar !== null,
       downbeat_changed: timing.first_downbeat !== null,
     });
@@ -156,7 +158,7 @@ export function MidiExportDialog(props: {
           <h2 className="m-0 text-base font-semibold text-content">Download MIDI</h2>
           <p className="m-0 mt-1 text-xs text-faint">
             {grid
-              ? `${grid.bpm.toFixed(1)} BPM${
+              ? `${grid.steady === false ? `Following the performance, ~${grid.bpm.toFixed(0)}` : grid.bpm.toFixed(1)} BPM${
                   grid.beats_per_bar ? `, ${grid.beats_per_bar}/4` : ""
                 } — change it under Tempo & bars.`
               : "No tempo: written at 120 BPM. Set one under Tempo & bars."}

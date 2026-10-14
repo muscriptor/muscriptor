@@ -19,8 +19,9 @@ export interface RollNote {
   stackOffset?: number;
 }
 
-/** Constant-tempo grid from the backend (`transcription_complete`'s `beat_grid`). */
+/** Beat grid from the backend (`transcription_complete`'s `beat_grid`). */
 export interface BeatGrid {
+  /** The constant tempo; for an unsteady grid, the average one. */
   bpm: number;
   /** null when the meter is unknown — then only beat lines are drawn. */
   beats_per_bar: number | null;
@@ -36,6 +37,62 @@ export interface BeatGrid {
   /** Steps per beat the onsets sit on (4 = sixteenths), or null if none: what
    *  /export quantizes to unless told otherwise. */
   beat_subdivision?: number | null;
+  /** Whether `beats` fit the constant `bpm`. False: draw the bars on `beats`. */
+  steady?: boolean;
+  /** Tracked beat times, in seconds of the original audio. */
+  beats?: number[] | null;
+}
+
+/**
+ * The time of beat `k` of `grid`, counted from its first downbeat (k = 0).
+ * A steady grid's beats are evenly spaced; an unsteady one's are the tracked
+ * beats, continued at the edge intervals' tempo beyond them.
+ */
+function beatClock(grid: BeatGrid): {
+  timeOf: (k: number) => number;
+  /** The beat at or just before `t`. */
+  indexAt: (t: number) => number;
+  /** Seconds per beat, on average: for spacing decisions. */
+  period: number;
+} {
+  const beats = grid.beats;
+  if (grid.steady !== false || !beats || beats.length < 2) {
+    const period = 60 / grid.bpm;
+    return {
+      timeOf: (k) => grid.first_downbeat + k * period,
+      indexAt: (t) => Math.floor((t - grid.first_downbeat) / period),
+      period,
+    };
+  }
+  const n = beats.length;
+  let d = 0;
+  for (let i = 1; i < n; i++) {
+    if (Math.abs(beats[i] - grid.first_downbeat) < Math.abs(beats[d] - grid.first_downbeat)) d = i;
+  }
+  const head = beats[1] - beats[0];
+  const tail = beats[n - 1] - beats[n - 2];
+  return {
+    timeOf: (k) => {
+      const i = k + d;
+      if (i < 0) return beats[0] + i * head;
+      if (i >= n) return beats[n - 1] + (i - n + 1) * tail;
+      return beats[i];
+    },
+    indexAt: (t) => {
+      if (t < beats[0]) return Math.floor((t - beats[0]) / head) - d;
+      if (t >= beats[n - 1]) return n - 1 + Math.floor((t - beats[n - 1]) / tail) - d;
+      // Binary search for the last beat at or before t.
+      let lo = 0;
+      let hi = n - 1;
+      while (hi - lo > 1) {
+        const mid = (lo + hi) >> 1;
+        if (beats[mid] <= t) lo = mid;
+        else hi = mid;
+      }
+      return lo - d;
+    },
+    period: (beats[n - 1] - beats[0]) / (n - 1),
+  };
 }
 
 /** Don't shade measures narrower than this (px) — double the shading step instead. */
@@ -78,26 +135,27 @@ export function timeGrid(
     for (let s = Math.max(0, Math.ceil(from)); s <= to; s++) lines.push(s);
     return { lines, strips };
   }
-  const beat = 60 / grid.bpm;
+  const clock = beatClock(grid);
   // Meter unknown: shade every beat, there's nothing coarser to group them into.
-  let step = (grid.beats_per_bar ?? 1) * beat;
-  while (step * pxPerSec < MIN_BAR_PX) step *= 2;
+  let step = grid.beats_per_bar ?? 1; // in beats
+  while (step * clock.period * pxPerSec < MIN_BAR_PX) step *= 2;
   // Start one measure early so the bar straddling `from` still gets shaded.
-  for (let k = Math.floor((from - grid.first_downbeat) / step); ; k++) {
-    const t = grid.first_downbeat + k * step;
+  for (let m = Math.floor(clock.indexAt(from) / step); ; m++) {
+    const t = clock.timeOf(m * step);
     if (t > to) break;
+    const end = clock.timeOf((m + 1) * step);
     // Odd measures carry the shading; even ones show bare background.
-    if (((k % 2) + 2) % 2 === 1 && t + step > 0) {
-      strips.push({ from: Math.max(0, t), to: t + step });
+    if (((m % 2) + 2) % 2 === 1 && end > 0) {
+      strips.push({ from: Math.max(0, t), to: end });
     }
   }
   // Beat lines only where they'd stay legible, and only if they're finer than
   // the (possibly doubled) shading step.
-  if (step > beat && beat * pxPerSec >= MIN_BEAT_PX) {
-    for (let k = Math.ceil((from - grid.first_downbeat) / beat); ; k++) {
-      const t = grid.first_downbeat + k * beat;
+  if (step > 1 && clock.period * pxPerSec >= MIN_BEAT_PX) {
+    for (let k = clock.indexAt(from); ; k++) {
+      const t = clock.timeOf(k);
       if (t > to) break;
-      if (t >= 0) lines.push(t);
+      if (t >= Math.max(0, from)) lines.push(t);
     }
   }
   return { lines, strips };

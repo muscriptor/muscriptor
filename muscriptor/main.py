@@ -233,8 +233,8 @@ def transcribe(
         Literal["true", "false", "best-effort"],
         typer.Option(
             help=(
-                "Detect the tempo and time signature from the audio and write "
-                "them into the MIDI. 'true' fails if no steady tempo is found, "
+                "Detect the beats and time signature from the audio and write "
+                "them into the MIDI. 'true' fails if no beats are found, "
                 "'best-effort' warns and uses a placeholder 120 BPM with no "
                 "time signature, 'false' skips detection altogether."
             ),
@@ -271,6 +271,29 @@ def transcribe(
             rich_help_panel="MIDI timing",
         ),
     ] = None,
+    tempo_map: Annotated[
+        bool | None,
+        typer.Option(
+            "--tempo-map/--fixed-tempo",
+            help=(
+                "Follow the tracked beats with a tempo map, or write one constant "
+                "tempo. Default: a tempo map only when the tempo isn't steady."
+            ),
+            show_default=False,
+            rich_help_panel="MIDI timing",
+        ),
+    ] = None,
+    beat_scale: Annotated[
+        float,
+        typer.Option(
+            "--beat-scale",
+            help=(
+                "Beats per detected beat: 2 if the detected tempo is half what "
+                "it should be, 0.5 if double. A power of two."
+            ),
+            rich_help_panel="MIDI timing",
+        ),
+    ] = 1.0,
     quantize: Annotated[
         bool,
         typer.Option(
@@ -388,6 +411,26 @@ def transcribe(
             typer.echo(f"Error: {e}", err=True)
             raise typer.Exit(1)
 
+    # Checked before the model loads, like the sheets output above.
+    try:
+        export = ExportOptions(
+            bpm=bpm,
+            beats_per_bar=beats_per_bar,
+            first_downbeat=first_downbeat,
+            tempo_map=tempo_map,
+            beat_scale=beat_scale,
+            # Sheets are always quantized to get the "idealized" timing, otherwise
+            # we might get very weird 1/64th rests etc.
+            quantize=quantize or format == OutputFormat.sheets,
+            subdivision=grid,
+            strength=quantize_strength,
+            fill_gaps=fill_gaps,
+            trim_leading_bars=trim_leading_bars,
+        )
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
     _device = None if device == "auto" else device
 
     # All chatty progress/timing info goes to stderr — stdout is reserved for
@@ -411,19 +454,6 @@ def transcribe(
         no_eos_is_ok=not strict_eos,
         beam_size=beam_size,
         prelude_forcing=prelude_forcing,
-    )
-
-    export = ExportOptions(
-        bpm=bpm,
-        beats_per_bar=beats_per_bar,
-        first_downbeat=first_downbeat,
-        # Sheets are always quantized to get the "idealized" timing, otherwise we
-        # might get very weird 1/64th rests etc.
-        quantize=quantize or format == OutputFormat.sheets,
-        subdivision=grid,
-        strength=quantize_strength,
-        fill_gaps=fill_gaps,
-        trim_leading_bars=trim_leading_bars,
     )
 
     if format == OutputFormat.sheets:

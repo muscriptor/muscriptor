@@ -132,7 +132,6 @@ def test_transcribe_sends_beat_grid(tmp_path):
     """The detected grid rides along with the final MIDI event, for the UI's bar lines."""
     model = make_model()
     model.detect_beat_grid_for.return_value = BeatGrid(
-        # A real detected grid carries `beats`, which must not reach the JSON.
         bpm=123.5,
         beats_per_bar=4,
         first_downbeat=0.75,
@@ -152,6 +151,9 @@ def test_transcribe_sends_beat_grid(tmp_path):
         # from, so the UI is told to shift its notes by nothing.
         "onset_delay": 0.0,
         "beat_subdivision": None,
+        "steady": True,
+        # The tracked beats, for bar lines that follow a wandering tempo.
+        "beats": [0.75, 1.24],
     }
 
 
@@ -742,3 +744,36 @@ def test_export_writes_a_real_midi_file():
     midi = MidiFile(file=io.BytesIO(resp.content))
     tempos = [m.tempo for t in midi.tracks for m in t if m.type == "set_tempo"]
     assert tempos[0] == round(60_000_000 / 90)
+
+
+def test_export_takes_tracked_beats_and_tempo_map_options():
+    model = make_model()
+    client = TestClient(create_app(model))
+    resp = client.post(
+        "/export",
+        json={
+            "notes": _EXPORT_NOTES,
+            "beat_grid": {
+                "bpm": 100.0,
+                "beats_per_bar": 3,
+                "first_downbeat": 0.5,
+                "steady": False,
+                "beats": [0.5, 1.1, 1.65, 2.2],
+            },
+            "options": {"tempo_map": True, "beat_scale": 2},
+        },
+    )
+    assert resp.status_code == 200
+    _, kwargs = model.events_to_midi_bytes.call_args
+    grid = kwargs["beat_grid"]
+    assert grid.steady is False
+    assert grid.beats.tolist() == [0.5, 1.1, 1.65, 2.2]
+    assert kwargs["export"] == ExportOptions(tempo_map=True, beat_scale=2)
+
+
+def test_export_rejects_a_beat_scale_that_is_not_a_power_of_two():
+    client = TestClient(create_app(make_model()))
+    resp = client.post(
+        "/export", json={"notes": _EXPORT_NOTES, "options": {"beat_scale": 3}}
+    )
+    assert resp.status_code == 422
