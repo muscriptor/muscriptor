@@ -1,6 +1,16 @@
-import { useEffect, useRef, type Dispatch, type RefObject, type SetStateAction } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type RefObject,
+  type SetStateAction,
+} from "react";
 import type { AudioEngine } from "../audio";
-import { PianoRoll, KEY_WIDTH } from "../pianoroll";
+import { PianoRoll, KEY_WIDTH, noteLabel, durationLabel, type RollNote } from "../pianoroll";
+import { tooltipPosition } from "./tooltipPosition";
+
+type HoveredNote = { note: RollNote; x: number; y: number };
 
 export function PianoRollCanvas(props: {
   rollRef: RefObject<PianoRoll | null>;
@@ -9,6 +19,7 @@ export function PianoRollCanvas(props: {
 }) {
   const { rollRef, audio, setUserScrolled } = props;
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [hoveredNote, setHoveredNote] = useState<HoveredNote | null>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current!;
@@ -100,9 +111,17 @@ export function PianoRollCanvas(props: {
         setUserScrolled(true);
         return;
       }
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      if (x < 0 || x > rect.width || y < 0 || y > rect.height) {
+        setHoveredNote(null);
+        return;
+      }
+      const note = roll.noteAt(x, y);
+      setHoveredNote(note ? { note, x, y } : null);
       // Hint the gesture with a resize cursor while hovering the key strip.
       canvas.style.cursor =
-        e.clientX - rect.left < KEY_WIDTH ? "ew-resize" : "default";
+        x < KEY_WIDTH ? "ew-resize" : note ? "help" : "default";
     };
     const onMouseUp = () => {
       if (scrub) {
@@ -114,6 +133,7 @@ export function PianoRollCanvas(props: {
       }
       keyDrag = null;
     };
+    const onMouseLeave = () => setHoveredNote(null);
 
     // Touch: one finger drags the view (left/right scrolls time, up/down pans
     // the pitch axis when zoomed); two fingers pinch to zoom — horizontal
@@ -167,6 +187,7 @@ export function PianoRollCanvas(props: {
     canvas.addEventListener("touchmove", onTouchMove, { passive: false });
     canvas.addEventListener("touchend", onTouchEnd, { passive: false });
     canvas.addEventListener("mousedown", onMouseDown);
+    canvas.addEventListener("mouseleave", onMouseLeave);
     window.addEventListener("mousemove", onMouseMove);
     window.addEventListener("mouseup", onMouseUp);
     return () => {
@@ -175,6 +196,7 @@ export function PianoRollCanvas(props: {
       canvas.removeEventListener("touchmove", onTouchMove);
       canvas.removeEventListener("touchend", onTouchEnd);
       canvas.removeEventListener("mousedown", onMouseDown);
+      canvas.removeEventListener("mouseleave", onMouseLeave);
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
     };
@@ -183,6 +205,18 @@ export function PianoRollCanvas(props: {
   return (
     <section className="relative col-start-1 overflow-hidden rounded-card border border-line bg-[linear-gradient(180deg,rgba(255,255,255,0.02),transparent_60px),#0a0b0e] p-0 shadow-canvas animate-rise [animation-delay:0.12s]">
       <canvas className="block h-[420px] w-full" width={1200} height={400} ref={canvasRef} />
+      {(() => {
+        if (!hoveredNote) return null;
+        const { width: W, height: H } = canvasRef.current!.getBoundingClientRect();
+        return (
+          <div
+            className="pointer-events-none absolute z-10 rounded-md border border-line-strong bg-surface-2 px-2 py-1 font-mono text-xs text-content shadow-pop"
+            style={tooltipPosition(hoveredNote.x, hoveredNote.y, W, H)}
+          >
+            {noteLabel(hoveredNote.note.pitch)} · MIDI {hoveredNote.note.pitch} · {durationLabel(hoveredNote.note.end - hoveredNote.note.start, rollRef.current?.bpm ?? null)}
+          </div>
+        );
+      })()}
     </section>
   );
 }
