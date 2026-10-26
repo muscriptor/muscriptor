@@ -47,6 +47,16 @@ class _FakeModel:
         type(self).last_kwargs = kwargs
         return b"FAKE_MIDI", None
 
+    def transcribe_batch(self, audios, **kwargs):
+        events = list(self.transcribe())
+        type(self).last_kwargs = kwargs
+        # Completion order differs from input order, as with the real model.
+        for i, _audio in reversed(list(enumerate(audios))):
+            yield i, events
+
+    def postprocess(self, audio, events, detect_tempo, export):
+        return f"FAKE_MIDI {Path(audio).name} {len(events)}".encode(), None
+
 
 @pytest.fixture
 def fake_audio(tmp_path: Path) -> Path:
@@ -281,3 +291,78 @@ def test_a_bad_beat_scale_fails_before_transcribing(patched_model, fake_audio):
     assert result.exit_code == 1
     assert "power of two" in result.stderr
     assert _FakeModel.last_kwargs is None
+
+
+# ---------------------------------------------------------------------------
+# Several input files
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def fake_audios(tmp_path: Path, fake_audio: Path) -> list[Path]:
+    (tmp_path / "other").mkdir()
+    second = tmp_path / "other" / "second.wav"
+    second.write_bytes(fake_audio.read_bytes())
+    return [fake_audio, second]
+
+
+def test_several_files_write_next_to_each_input(patched_model, fake_audios):
+    result = CliRunner().invoke(main_mod.app, ["transcribe", *map(str, fake_audios)])
+    assert result.exit_code == 0, result.stderr
+    for audio in fake_audios:
+        assert audio.with_suffix(".mid").read_bytes() == (
+            f"FAKE_MIDI {audio.name} 4".encode()
+        )
+    assert "Transcribing 2 files" in result.stderr
+
+
+def test_several_files_to_output_dir(patched_model, fake_audios, tmp_path):
+    out_dir = tmp_path / "out"
+    result = CliRunner().invoke(
+        main_mod.app,
+        [
+            "transcribe",
+            *map(str, fake_audios),
+            "-f",
+            "jsonl",
+            "--output-dir",
+            str(out_dir),
+        ],
+    )
+    assert result.exit_code == 0, result.stderr
+    assert sorted(p.name for p in out_dir.iterdir()) == ["second.jsonl", "silent.jsonl"]
+    lines = (out_dir / "second.jsonl").read_text().splitlines()
+    assert [json.loads(ln)["type"] for ln in lines] == ["start", "end", "start", "end"]
+
+
+def test_several_files_batch_with_prelude_forcing(patched_model, fake_audios):
+    result = CliRunner().invoke(
+        main_mod.app, ["transcribe", *map(str, fake_audios), "--batch-size", "8"]
+    )
+    assert result.exit_code == 0, result.stderr
+    assert _FakeModel.last_kwargs["batch_size"] == 8
+    assert _FakeModel.last_kwargs["prelude_forcing"] is True
+
+
+def test_several_files_reject_a_single_output(patched_model, fake_audios, tmp_path):
+    result = CliRunner().invoke(
+        main_mod.app,
+        ["transcribe", *map(str, fake_audios), "-o", str(tmp_path / "x.mid")],
+    )
+    assert result.exit_code == 1
+    assert "--output-dir" in result.stderr
+
+
+def test_several_files_reject_output_name_clashes(patched_model, fake_audio, tmp_path):
+    result = CliRunner().invoke(
+        main_mod.app,
+        [
+            "transcribe",
+            str(fake_audio),
+            str(fake_audio),
+            "--output-dir",
+            str(tmp_path / "out"),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "would write to" in result.stderr

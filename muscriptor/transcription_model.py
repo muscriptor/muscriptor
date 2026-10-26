@@ -8,8 +8,8 @@ import re
 import sys
 import time
 import warnings
-from collections.abc import Callable, Iterator
-from dataclasses import dataclass
+from collections.abc import Callable, Iterable, Iterator
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import torch
@@ -93,6 +93,8 @@ def _resolve_source(weights_path: str | Path | None) -> str | Path:
 _SAMPLE_RATE = 16000
 # Must match the segment duration used during training / evaluation.
 _SEGMENT_DURATION = 5.0
+# Token budget of one chunk.
+_MAX_GEN_LEN = 2000
 
 
 @dataclass
@@ -250,6 +252,43 @@ def _build_instrument_for_program(tokenizer: MT3Tokenizer) -> Callable[[int], st
     return lookup
 
 
+AudioInput = str | Path | tuple[torch.Tensor, int]
+
+
+@dataclass
+class _BatchInput:
+    """An input of :meth:`TranscriptionModel.transcribe_batch` being transcribed."""
+
+    index: int
+    wav: torch.Tensor  # [1, T] at _SAMPLE_RATE
+    num_chunks: int
+    build_conditions: Callable[..., list[ConditioningAttributes]]
+    tracker: OpenNoteTracker | None  # set with prelude forcing
+    next_chunk: int = 0  # first chunk not scheduled yet
+    # Token stream of the chunks generated so far, as _generate_token_stream
+    # builds it for transcribe(): a boundary, then the chunk's tokens.
+    stream: list[int | ChunkBoundary] = field(default_factory=list)
+
+    def boundary(self, chunk_index: int) -> ChunkBoundary:
+        next_seek_time = (
+            (chunk_index + 1) * _SEGMENT_DURATION
+            if chunk_index + 1 < self.num_chunks
+            else None
+        )
+        return ChunkBoundary(chunk_index * _SEGMENT_DURATION, next_seek_time)
+
+    def condition(
+        self, chunk_index: int, instrument_group: str | None
+    ) -> ConditioningAttributes:
+        segment_samples = int(_SEGMENT_DURATION * _SAMPLE_RATE)
+        chunk = self.wav[
+            :, chunk_index * segment_samples : (chunk_index + 1) * segment_samples
+        ]
+        if chunk.shape[-1] < segment_samples:
+            chunk = F.pad(chunk, (0, segment_samples - chunk.shape[-1]))
+        return self.build_conditions(chunk, instrument_group)[0]
+
+
 class TranscriptionModel:
     """Transcribes audio to MIDI using the muscriptor model.
 
@@ -377,19 +416,7 @@ class TranscriptionModel:
         only care about notes can ignore them.
         """
         batch_size = self._resolve_batch_size(batch_size, prelude_forcing)
-
-        # Exact names only here — the CLI resolves abbreviations before
-        # calling in (resolve_instrument_names).
-        instrument_group = (
-            instrument_group_from_names(instruments) if instruments else None
-        )
-        forbidden_tokens = None
-        if instruments:
-            forbidden_tokens = torch.tensor(
-                self._tokenizer.forbidden_token_ids(instruments),
-                device=self._device,
-                dtype=torch.long,
-            )
+        instrument_group, forbidden_tokens = self._instrument_constraints(instruments)
 
         timings: list[tuple[str, float]] = []
         t_total = time.perf_counter()
@@ -407,7 +434,7 @@ class TranscriptionModel:
 
         segment_samples = int(_SEGMENT_DURATION * _SAMPLE_RATE)
         num_chunks = math.ceil(total_samples / segment_samples)
-        max_gen_len = 2000
+        max_gen_len = _MAX_GEN_LEN
         print(
             f"[muscriptor] audio: {total_duration:.1f}s → {num_chunks} chunk(s) of {_SEGMENT_DURATION}s",
             file=sys.stderr,
@@ -618,6 +645,242 @@ class TranscriptionModel:
             yield ProgressEvent(completed=batch_start + n, total=num_chunks)
 
     # ------------------------------------------------------------------
+    def transcribe_batch(
+        self,
+        audios: Iterable[AudioInput],
+        use_sampling: bool = False,
+        temperature: float = 1.0,
+        cfg_coef: float = 1.0,
+        instruments: list[str] | None = None,
+        batch_size: int | None = None,
+        no_eos_is_ok: bool = True,
+        beam_size: int = 1,
+        prelude_forcing: bool = True,
+    ) -> Iterator[tuple[int, list[NoteStartEvent | NoteEndEvent]]]:
+        """Transcribe several audio inputs, generating chunks of different inputs together.
+
+        Each ``generate`` call (forward pass) holds up to ``batch_size``
+        chunks taken from several inputs. With ``prelude_forcing`` (the
+        default) an input contributes one chunk per call, so its chunks
+        still generate strictly in order and every chunk after the first
+        gets its tie prologue forced, as in :meth:`transcribe`: batching
+        across inputs costs no quality. In full fp32 the results are
+        identical to :meth:`transcribe`; in reduced precision (fp16
+        autocast, TF32) batched kernels round differently, which can flip a
+        near-tied greedy choice now and then. Without it, an input may
+        contribute several chunks to the same call. When an input finishes,
+        the next one takes its place in the following calls.
+
+        Inputs (paths or ``(tensor, sample_rate)`` tuples) are loaded only
+        when they enter the batch, so ``audios`` can be a long list or a
+        generator.
+
+        Yields ``(index, events)`` for every input as soon as its last chunk
+        is decoded, so not necessarily in input order. ``index`` is the
+        input's position in ``audios`` and ``events`` its NoteStart/NoteEnd
+        events (no ProgressEvent), as :meth:`transcribe` yields them.
+        """
+        if batch_size is None:
+            batch_size = 4 if self._device.type in ("cuda", "mps") else 1
+        if prelude_forcing and beam_size > 1 and batch_size > 1:
+            raise ValueError(
+                "beam search with prelude forcing needs batch_size=1: the "
+                "forced prologues of different inputs have different lengths"
+            )
+        instrument_group, forbidden_tokens = self._instrument_constraints(instruments)
+        t_total = time.perf_counter()
+
+        inputs = enumerate(audios)
+        active: list[_BatchInput] = []
+        exhausted = False
+        while True:
+            # One generate() call: (input, chunk index) per row.
+            rows: list[tuple[_BatchInput, int]] = []
+
+            def schedule(item: _BatchInput) -> None:
+                per_call = 1 if prelude_forcing else item.num_chunks
+                while (
+                    len(rows) < batch_size
+                    and per_call > 0
+                    and item.next_chunk < item.num_chunks
+                ):
+                    rows.append((item, item.next_chunk))
+                    item.next_chunk += 1
+                    per_call -= 1
+
+            for item in active:
+                schedule(item)
+            while len(rows) < batch_size and not exhausted:
+                try:
+                    index, audio = next(inputs)
+                except StopIteration:
+                    exhausted = True
+                    break
+                item = self._start_batch_input(index, audio, prelude_forcing)
+                if item.num_chunks == 0:
+                    yield index, []
+                    continue
+                active.append(item)
+                schedule(item)
+            if not rows:
+                break
+
+            prompts: list[list[int]] = []
+            for item, chunk_index in rows:
+                prompt: list[int] = []
+                if item.tracker is not None:
+                    # As in _generate_token_stream: the boundary settles the
+                    # tracker, then open_keys() is exactly the decoder's view.
+                    item.tracker.feed(item.boundary(chunk_index))
+                    if chunk_index > 0:
+                        prompt = self._tokenizer.tie_section_token_ids(
+                            item.tracker.open_keys()
+                        )
+                prompts.append(prompt)
+
+            tokens, done = self._generate_rows(
+                [
+                    item.condition(chunk_index, instrument_group)
+                    for item, chunk_index in rows
+                ],
+                prompts,
+                use_sampling,
+                temperature,
+                cfg_coef,
+                beam_size,
+                forbidden_tokens,
+            )
+
+            for (item, chunk_index), chunk_tokens, chunk_done in zip(
+                rows, tokens, done
+            ):
+                if not chunk_done:
+                    msg = (
+                        f"input {item.index} chunk {chunk_index} "
+                        f"(seek={chunk_index * _SEGMENT_DURATION:.1f}s) "
+                        f"did not emit EOS within {_MAX_GEN_LEN} tokens"
+                    )
+                    if no_eos_is_ok:
+                        warnings.warn(msg, RuntimeWarning, stacklevel=2)
+                    else:
+                        raise RuntimeError(
+                            msg + " (this is only raised under --strict-eos)"
+                        )
+                if item.tracker is not None:
+                    for tok in chunk_tokens:
+                        item.tracker.feed(tok)
+                item.stream.append(item.boundary(chunk_index))
+                item.stream.extend(chunk_tokens)
+
+            for item in [it for it in active if it.next_chunk == it.num_chunks]:
+                active.remove(item)
+                events = [
+                    ev
+                    for ev in decode_model_tokens(
+                        iter(item.stream),
+                        self._tokenizer._vocab,
+                        self._instrument_for_program,
+                        frame_rate=self._tokenizer.frame_rate,
+                    )
+                    if not isinstance(ev, ProgressEvent)
+                ]
+                yield item.index, events
+
+        muscriptor.accelerator.synchronize()
+        print(
+            f"[muscriptor] transcribe_batch total: {time.perf_counter() - t_total:.2f}s",
+            file=sys.stderr,
+        )
+
+    def _start_batch_input(
+        self, index: int, audio: AudioInput, prelude_forcing: bool
+    ) -> "_BatchInput":
+        tensor, sample_rate = audio if isinstance(audio, tuple) else (audio, None)
+        wav = self._load_wav(tensor, sample_rate)
+        segment_samples = int(_SEGMENT_DURATION * _SAMPLE_RATE)
+        tracker = None
+        if prelude_forcing:
+            tracker = OpenNoteTracker(
+                self._tokenizer._vocab, self._tokenizer.frame_rate
+            )
+        return _BatchInput(
+            index=index,
+            wav=wav,
+            num_chunks=math.ceil(wav.shape[-1] / segment_samples),
+            build_conditions=self._build_conditions,
+            tracker=tracker,
+        )
+
+    def _generate_rows(
+        self,
+        conditions: list[ConditioningAttributes],
+        prompts: list[list[int]],
+        use_sampling: bool,
+        temperature: float,
+        cfg_coef: float,
+        beam_size: int,
+        forbidden_tokens: torch.Tensor | None,
+    ) -> tuple[list[list[int]], list[bool]]:
+        """One ``generate`` call over independent rows, each with its own prompt.
+
+        Prompts of different lengths are right-padded with the model's
+        "ungenerated" token: ``generate`` teacher-forces every position that
+        is already filled, and generates the others. Returns each row's
+        tokens (prompt included, EOS and anything after it dropped) and
+        whether the row emitted EOS.
+        """
+        eos_id = self._tokenizer.eos_id
+        prompt = None
+        longest = max(map(len, prompts))
+        if longest:
+            prompt = torch.full(
+                (len(prompts), longest),
+                self._model.ungenerated_token_id,
+                device=self._device,
+                dtype=torch.long,
+            )
+            for j, p in enumerate(prompts):
+                prompt[j, : len(p)] = torch.tensor(p, dtype=torch.long)
+        tokens: list[list[int]] = [[] for _ in prompts]
+        done = [False] * len(prompts)
+        for step in self._model.generate(
+            prompt=prompt,
+            conditions=conditions,
+            max_gen_len=_MAX_GEN_LEN,
+            use_sampling=use_sampling,
+            temp=temperature,
+            top_k=0,
+            top_p=0.0,
+            cfg_coef=cfg_coef,
+            early_stop_on_token=eos_id,
+            beam_size=beam_size,
+            forbidden_tokens=forbidden_tokens,
+        ):
+            for j, tok in enumerate(step.tolist()):
+                if done[j]:
+                    continue
+                if tok == eos_id:
+                    done[j] = True
+                else:
+                    tokens[j].append(tok)
+        return tokens, done
+
+    def _instrument_constraints(
+        self, instruments: list[str] | None
+    ) -> tuple[str | None, torch.Tensor | None]:
+        """Conditioning string and forbidden token ids for an instrument list."""
+        # Exact names only here — the CLI resolves abbreviations before
+        # calling in (resolve_instrument_names).
+        if not instruments:
+            return None, None
+        forbidden_tokens = torch.tensor(
+            self._tokenizer.forbidden_token_ids(instruments),
+            device=self._device,
+            dtype=torch.long,
+        )
+        return instrument_group_from_names(instruments), forbidden_tokens
+
+    # ------------------------------------------------------------------
     def transcribe_and_postprocess(
         self,
         audio: str | Path | tuple[torch.Tensor, int],
@@ -660,6 +923,27 @@ class TranscriptionModel:
                 prelude_forcing=prelude_forcing,
             )
         )
+        return self._postprocess(events, beat_grid, export)
+
+    def postprocess(
+        self,
+        audio: AudioInput,
+        events: list[NoteStartEvent | NoteEndEvent | ProgressEvent],
+        detect_tempo: TempoDetection = "best-effort",
+        export: ExportOptions | None = None,
+    ) -> tuple[bytes, BeatGrid | None]:
+        """The second half of :meth:`transcribe_and_postprocess`, for events
+        transcribed separately (e.g. one input of :meth:`transcribe_batch`):
+        detect the beat grid of `audio` and write `events` as a MIDI file."""
+        beat_grid = self.detect_beat_grid_for(audio, detect_tempo)
+        return self._postprocess(events, beat_grid, export or ExportOptions())
+
+    def _postprocess(
+        self,
+        events: list[NoteStartEvent | NoteEndEvent | ProgressEvent],
+        beat_grid: BeatGrid | None,
+        export: ExportOptions,
+    ) -> tuple[bytes, BeatGrid | None]:
         onsets = [ev.start_time for ev in events if isinstance(ev, NoteStartEvent)]
         if beat_grid is not None:
             beat_grid = beat_grid.with_onset_delay(onsets)

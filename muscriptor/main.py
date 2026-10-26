@@ -50,19 +50,33 @@ class OutputFormat(str, Enum):
     sheets = "sheets"
 
 
+_TEMPO_MODES: dict[str, TempoDetection] = {
+    "true": True,
+    "false": False,
+    "best-effort": "best-effort",
+}
+
+
 def _transcribe(model, kwargs: dict, detect_tempo: str, export: ExportOptions):
     """transcribe_and_postprocess, with the CLI's --detect-tempo spelling and errors."""
     try:
-        mode: TempoDetection = {
-            "true": True,
-            "false": False,
-            "best-effort": "best-effort",
-        }[detect_tempo]
         return model.transcribe_and_postprocess(
-            **kwargs, detect_tempo=mode, export=export
+            **kwargs, detect_tempo=_TEMPO_MODES[detect_tempo], export=export
         )
     except BeatDetectionError as e:
         typer.echo(f"Error: {e}", err=True)
+        typer.echo("Pass --detect-tempo best-effort or false to continue.", err=True)
+        raise typer.Exit(1)
+
+
+def _postprocess(model, audio: Path, events, detect_tempo: str, export: ExportOptions):
+    """model.postprocess, with the CLI's --detect-tempo spelling and errors."""
+    try:
+        return model.postprocess(
+            audio, events, detect_tempo=_TEMPO_MODES[detect_tempo], export=export
+        )
+    except BeatDetectionError as e:
+        typer.echo(f"Error: {audio}: {e}", err=True)
         typer.echo("Pass --detect-tempo best-effort or false to continue.", err=True)
         raise typer.Exit(1)
 
@@ -79,8 +93,15 @@ def _event_to_dict(ev: NoteStartEvent | NoteEndEvent) -> dict:
 
 @app.command()
 def transcribe(
-    audio_file: Annotated[
-        Path, typer.Argument(help="Input audio file (wav, mp3, flac, …)")
+    audio_files: Annotated[
+        list[Path],
+        typer.Argument(
+            help=(
+                "Input audio file(s) (wav, mp3, flac, …). Several files are "
+                "transcribed together: each forward pass generates chunks of "
+                "up to --batch-size files."
+            )
+        ),
     ],
     output: Annotated[
         Path | None,
@@ -92,7 +113,19 @@ def transcribe(
                 "timing info is sent to stderr in that case). "
                 "Default: <audio_file>.<ext> where ext matches --format. "
                 "With --format sheets this is a directory instead: it must be "
-                "empty or not exist yet, and is created if missing."
+                "empty or not exist yet, and is created if missing. Only for a "
+                "single input file; use --output-dir for several."
+            ),
+        ),
+    ] = None,
+    output_dir: Annotated[
+        Path | None,
+        typer.Option(
+            "--output-dir",
+            help=(
+                "Directory for the outputs, each named like the default "
+                "(<audio_file stem>.<ext>, or <stem>_sheets). Default: next to "
+                "each input file."
             ),
         ),
     ] = None,
@@ -161,9 +194,12 @@ def transcribe(
             "--batch-size",
             "-b",
             help=(
-                "Chunks generated per forward pass (default: 1; with "
-                "--no-prelude-forcing: 4 on GPU, 1 on CPU). Values > 1 lower "
-                "quality at chunk boundaries and require --no-prelude-forcing."
+                "Chunks generated per forward pass. For a single file: default "
+                "1; with --no-prelude-forcing: 4 on GPU, 1 on CPU. There, values "
+                "> 1 lower quality at chunk boundaries and require "
+                "--no-prelude-forcing. With several files, the chunks come from "
+                "different files, which keeps prelude forcing (default: 4 on "
+                "GPU, 1 on CPU)."
             ),
         ),
     ] = None,
@@ -353,7 +389,7 @@ def transcribe(
         ),
     ] = False,
 ) -> None:
-    """Transcribe an audio file to MIDI."""
+    """Transcribe audio file(s) to MIDI."""
     instrument_names: list[str] | None = None
     if instruments is not None:
         tokens = [n for n in instruments.split(",") if n.strip()]
@@ -368,11 +404,24 @@ def transcribe(
             raise typer.Exit(1)
         typer.echo(f"Instruments: {', '.join(instrument_names)}", err=True)
 
-    if not audio_file.exists():
-        typer.echo(f"Error: file not found: {audio_file}", err=True)
+    missing = [str(f) for f in audio_files if not f.exists()]
+    if missing:
+        typer.echo(f"Error: file not found: {', '.join(missing)}", err=True)
         raise typer.Exit(1)
 
-    if prelude_forcing and batch_size is not None and batch_size != 1:
+    several = len(audio_files) > 1
+    if several and output is not None:
+        typer.echo(
+            "Error: --output/-o takes a single input file; use --output-dir "
+            "for several.",
+            err=True,
+        )
+        raise typer.Exit(1)
+    if several and auralize is not None:
+        typer.echo("Error: --auralize takes a single input file.", err=True)
+        raise typer.Exit(1)
+
+    if not several and prelude_forcing and batch_size is not None and batch_size != 1:
         typer.echo(
             f"Error: --batch-size {batch_size} requires --no-prelude-forcing: "
             "batching disables prelude forcing, which lowers transcription "
@@ -383,16 +432,28 @@ def transcribe(
 
     is_stdout = output is not None and str(output) == "-"
 
-    if output is None:
+    def default_output(audio_file: Path) -> Path:
         if format == OutputFormat.sheets:
-            output = audio_file.parent / f"{audio_file.stem}_sheets"
+            path = audio_file.parent / f"{audio_file.stem}_sheets"
         else:
             suffix = {
                 OutputFormat.midi: ".mid",
                 OutputFormat.json: ".json",
                 OutputFormat.jsonl: ".jsonl",
             }[format]
-            output = audio_file.with_suffix(suffix)
+            path = audio_file.with_suffix(suffix)
+        return path if output_dir is None else output_dir / path.name
+
+    outputs = [output] if output is not None else list(map(default_output, audio_files))
+    clashes = sorted({str(o) for o in outputs if outputs.count(o) > 1})
+    if clashes:
+        typer.echo(
+            f"Error: several input files would write to {', '.join(clashes)}",
+            err=True,
+        )
+        raise typer.Exit(1)
+    if output_dir is not None:
+        output_dir.mkdir(parents=True, exist_ok=True)
 
     if format == OutputFormat.sheets:
         if is_stdout:
@@ -405,7 +466,8 @@ def transcribe(
         # Both checked before the model loads: transcribing a song takes long
         # enough that discovering a missing MuseScore afterwards would sting.
         try:
-            prepare_output_dir(output)
+            for path in outputs:
+                prepare_output_dir(path)
             find_musescore()
         except (ValueError, MuseScoreNotFoundError) as e:
             typer.echo(f"Error: {e}", err=True)
@@ -438,11 +500,38 @@ def transcribe(
     typer.echo("Loading model…", err=True)
     model = _load_model(model_path, _device, dtype)
 
-    typer.echo(f"Transcribing {audio_file} …", err=True)
-
     if auralize is not None and format != OutputFormat.midi:
         typer.echo("Error: --auralize requires --format midi", err=True)
         raise typer.Exit(1)
+
+    if several:
+        typer.echo(f"Transcribing {len(audio_files)} files …", err=True)
+        results = model.transcribe_batch(
+            audio_files,
+            use_sampling=sampling,
+            temperature=temperature,
+            cfg_coef=cfg_coef,
+            instruments=instrument_names,
+            batch_size=batch_size,
+            no_eos_is_ok=not strict_eos,
+            beam_size=beam_size,
+            prelude_forcing=prelude_forcing,
+        )
+        for i, events in results:
+            _write_output(
+                model,
+                audio_files[i],
+                events,
+                outputs[i],
+                format,
+                detect_tempo,
+                export,
+                notes,
+            )
+        return
+
+    audio_file, output = audio_files[0], outputs[0]
+    typer.echo(f"Transcribing {audio_file} …", err=True)
 
     kwargs = dict(
         audio=audio_file,
@@ -531,6 +620,47 @@ def transcribe(
         if notes:
             for e in events:
                 typer.echo(str(e), err=True)
+
+
+def _write_output(
+    model: TranscriptionModel,
+    audio_file: Path,
+    events: list[NoteStartEvent | NoteEndEvent],
+    output: Path,
+    format: OutputFormat,
+    detect_tempo: str,
+    export: ExportOptions,
+    notes: bool,
+) -> None:
+    """Write one input's events from transcribe_batch, as the single-file path would."""
+    if format in (OutputFormat.midi, OutputFormat.sheets):
+        midi_bytes, beat_grid = _postprocess(
+            model, audio_file, events, detect_tempo, export
+        )
+        if format == OutputFormat.midi:
+            output.write_bytes(midi_bytes)
+            typer.echo(f"Saved MIDI to {output}", err=True)
+        else:
+            try:
+                written = write_sheets(
+                    midi_bytes,
+                    output,
+                    quantized=beat_grid is not None
+                    and beat_grid.beat_subdivision is not None,
+                )
+            except MuseScoreError as e:
+                typer.echo(f"Error: {audio_file}: {e}", err=True)
+                raise typer.Exit(1)
+            typer.echo(f"Saved {len(written)} files to {output}", err=True)
+    elif format == OutputFormat.jsonl:
+        output.write_text("".join(json.dumps(_event_to_dict(e)) + "\n" for e in events))
+        typer.echo(f"Saved JSONL to {output}", err=True)
+    else:  # json
+        output.write_text(json.dumps([_event_to_dict(e) for e in events], indent=2))
+        typer.echo(f"Saved JSON to {output}", err=True)
+    if notes:
+        for e in events:
+            typer.echo(str(e), err=True)
 
 
 @app.command()
