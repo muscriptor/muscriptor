@@ -59,6 +59,27 @@ On Windows the default PyTorch backend is `cpu`, so the GPU needs
 after torch 2.2.2, which supports Python ≤ 3.12, so the Python version has to
 be pinned (if you install with pip/uv instead, use Python 3.10–3.12).
 
+### From a clone, on Linux with an NVIDIA GPU
+
+`install.sh` sets up everything in a local `.venv` with uv (installing uv if
+needed): the locked dependencies, the web UI (built with pnpm if present,
+otherwise taken from the PyPI release), fluidsynth via apt, and the
+HuggingFace login.
+
+```bash
+./install.sh                 # --model large to pre-download weights, --no-apt to skip sudo
+./run.sh serve               # or: ./run.sh transcribe song.mp3
+```
+
+PyTorch from PyPI needs NVIDIA driver 580 or newer (CUDA 13); with an older
+driver the installer swaps in a matching PyTorch build, and `run.sh` keeps it
+(`uv run` would restore the locked one).
+
+On CUDA the transformer runs in native float16 and the decode steps are
+replayed as CUDA graphs, which is what makes batch-size-1 decoding fast.
+`MUSCRIPTOR_CUDA_GRAPHS=0` turns the graphs off; `--dtype float32` goes back
+to float32 weights with float16 autocast.
+
 ## Web UI
 
 You can host the web UI locally with:

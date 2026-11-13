@@ -82,6 +82,12 @@ class StreamingMultiheadAttention(StatefulModule):
         packed = rearrange(projected, "b t (p h d) -> b t p h d", p=3, h=self.num_heads)
         q, k, v = packed.unbind(dim=2)
 
+        position = state.get("position") if state is not None else None
+        if position is not None and q.shape[1] == 1:
+            return self._static_decode_step(
+                q, k, v, state["cache"], position, state.get("attend_length")
+            )
+
         k, v = self._complete_kv(k, v, state)
         dtype = q.dtype
 
@@ -116,6 +122,29 @@ class StreamingMultiheadAttention(StatefulModule):
         x = rearrange(x, "b t h d -> b t (h d)")
         x = self.out_proj(x)
         return x
+
+    def _static_decode_step(self, q, k, v, cache, position, attend_length=None):
+        """Single-token decode with fixed shapes, so it can be CUDA-graphed.
+
+        ``position`` is a 1-element device tensor holding the write offset.
+        The first ``attend_length`` cache slots (all of them by default) are
+        attended to, with every slot past ``position`` masked out: shapes no
+        longer depend on the step, and nothing reads a host-side offset, so a
+        captured graph replays for every step whose position is below
+        ``attend_length``.
+        """
+        cache.index_copy_(2, position, torch.stack([k, v]).to(cache.dtype))
+        L = cache.shape[2] if attend_length is None else attend_length
+        mask = (torch.arange(L, device=cache.device) <= position).view(1, 1, 1, L)
+        x = F.scaled_dot_product_attention(
+            q.transpose(1, 2),
+            cache[0, :, :L].transpose(1, 2),
+            cache[1, :, :L].transpose(1, 2),
+            attn_mask=mask,
+            dropout_p=0.0,
+        )
+        x = x.transpose(1, 2).to(q.dtype)
+        return self.out_proj(rearrange(x, "b t h d -> b t (h d)"))
 
 
 class StreamingTransformerLayer(nn.Module):
@@ -185,7 +214,9 @@ class StreamingTransformer(StatefulModule):
         }
 
     def increment_step(self, state: State, increment: int = 1) -> None:
-        state["offsets"] = state["offsets"] + increment
+        # In place: the CUDA-graph decoder reads this tensor (and a view of
+        # it) from inside a captured graph, so it must stay the same object.
+        state["offsets"].add_(increment)
 
     def forward(
         self,

@@ -132,6 +132,11 @@ class LMModel(nn.Module):
         )
         self.out_norm = nn.LayerNorm(dim, eps=1e-5)
         self.linear = nn.Linear(dim, card, bias=False)
+        # Replay greedy/sampling decode steps as a CUDA graph (see
+        # muscriptor.modules.cuda_graph). Off by default; load_model turns it
+        # on for CUDA devices.
+        self.cuda_graphs = False
+        self._graph_decoder = None
 
     # ------------------------------------------------------------------
     # Token ID properties
@@ -200,26 +205,23 @@ class LMModel(nn.Module):
         first_step: bool,
         cfg_coef: float | None = None,
         forbidden_tokens: torch.Tensor | None = None,
+        decoder=None,
     ) -> torch.Tensor:  # [B, card]
         """Run the forward pass and return masked logits at the last timestep."""
         B = sequence.shape[0]
         cfg_coef = self.cfg_coef if cfg_coef is None else cfg_coef
 
+        def run(seq: torch.Tensor) -> torch.Tensor:
+            if decoder is not None and not first_step:
+                return decoder.step(seq)
+            return self(
+                seq, cfg_conditions, first_step=first_step, model_state=model_state
+            )
+
         if cfg_coef == 1.0:
-            logits = self(
-                sequence,
-                cfg_conditions,
-                first_step=first_step,
-                model_state=model_state,
-            )
+            logits = run(sequence)
         else:
-            doubled = torch.cat([sequence, sequence], dim=0)
-            all_logits = self(
-                doubled,
-                cfg_conditions,
-                first_step=first_step,
-                model_state=model_state,
-            )
+            all_logits = run(torch.cat([sequence, sequence], dim=0))
             cond_logits, uncond_logits = all_logits.split(B, dim=0)
             logits = uncond_logits + (cond_logits - uncond_logits) * cfg_coef
 
@@ -241,10 +243,11 @@ class LMModel(nn.Module):
         top_p: float = 0.0,
         cfg_coef: float | None = None,
         forbidden_tokens: torch.Tensor | None = None,
+        decoder=None,
     ) -> torch.Tensor:  # [B]
         logits = self._compute_logits(
             sequence, cfg_conditions, model_state, first_step, cfg_coef,
-            forbidden_tokens=forbidden_tokens,
+            forbidden_tokens=forbidden_tokens, decoder=decoder,
         )
         if use_sampling and temp > 0.0:
             probs = torch.softmax(logits / temp, dim=-1)
@@ -252,6 +255,31 @@ class LMModel(nn.Module):
         else:
             next_tokens = torch.argmax(logits, dim=-1)  # [B]
         return next_tokens  # [B]
+
+    # ------------------------------------------------------------------
+    # CUDA graphs
+    # ------------------------------------------------------------------
+
+    def _acquire_graph_decoder(self, batch_size: int, sequence_length: int):
+        """The CUDA-graph decoder for this shape, or None to decode eagerly.
+
+        One decoder is kept (every chunk of a transcription has the same
+        shape, so it is captured once and replayed for all of them). It is
+        None while another generation still holds it, e.g. a stream that was
+        abandoned mid-way but not yet garbage collected.
+        """
+        from muscriptor.modules.cuda_graph import CUDAGraphDecoder
+
+        key = (batch_size, sequence_length)
+        dec = self._graph_decoder
+        if dec is not None and dec.in_use:
+            return None
+        if dec is None or dec.key != key:
+            # Drop the old graph (and its cache/memory pool) before allocating.
+            self._graph_decoder = dec = None
+            self._graph_decoder = CUDAGraphDecoder(self, batch_size, sequence_length)
+        self._graph_decoder.in_use = True
+        return self._graph_decoder
 
     # ------------------------------------------------------------------
     # Generation
@@ -371,9 +399,55 @@ class LMModel(nn.Module):
         prepend_length = sum(cond.shape[1] for cond, _ in cfg_conditions.values())
         cache_batch_size = eff_batch * (1 if cfg_coef == 1.0 else 2)
         cache_seq_len = prepend_length + max_gen_len
-        model_state = init_states(
-            self, batch_size=cache_batch_size, sequence_length=cache_seq_len
-        )
+        decoder = None
+        if beam_size == 1 and self.cuda_graphs:
+            decoder = self._acquire_graph_decoder(cache_batch_size, cache_seq_len)
+        if decoder is not None:
+            decoder.reset()
+            model_state = decoder.model_state
+        else:
+            model_state = init_states(
+                self, batch_size=cache_batch_size, sequence_length=cache_seq_len
+            )
+        try:
+            yield from self._generate_steps(
+                gen_sequence, cfg_conditions, model_state, decoder,
+                start_offset=start_offset, max_gen_len=max_gen_len,
+                prepend_length=prepend_length, num_samples=num_samples,
+                beam_size=beam_size, eff_batch=eff_batch,
+                use_sampling=use_sampling, temp=temp, top_k=top_k, top_p=top_p,
+                cfg_coef=cfg_coef, early_stop_on_token=early_stop_on_token,
+                beam_length_score_alpha=beam_length_score_alpha,
+                forbidden_tokens=forbidden_tokens,
+            )
+        finally:
+            if decoder is not None:
+                decoder.in_use = False
+
+    def _generate_steps(
+        self,
+        gen_sequence: torch.Tensor,
+        cfg_conditions: ConditionTensors,
+        model_state: ModelState,
+        decoder,
+        *,
+        start_offset: int,
+        max_gen_len: int,
+        prepend_length: int,
+        num_samples: int,
+        beam_size: int,
+        eff_batch: int,
+        use_sampling: bool,
+        temp: float,
+        top_k: int,
+        top_p: float,
+        cfg_coef: float,
+        early_stop_on_token: int | None,
+        beam_length_score_alpha: float,
+        forbidden_tokens: torch.Tensor | None,
+    ) -> Iterator[torch.Tensor]:
+        device = gen_sequence.device
+        ungenerated = self.ungenerated_token_id
 
         # Accumulated log-prob scores, one per beam row.
         beam_scores = torch.zeros(eff_batch, device=device, dtype=torch.float)
@@ -382,6 +456,13 @@ class LMModel(nn.Module):
         if beam_size == 1:
             for t in range(start_offset):
                 yield gen_sequence[:, t + 1]
+
+        # Which rows have emitted the stop token, tracked on the host from the
+        # tokens as they are produced: checking it on the device would cost a
+        # GPU sync per step on top of the one reading the token itself.
+        ended = None
+        if beam_size == 1 and early_stop_on_token is not None:
+            ended = (gen_sequence == early_stop_on_token).any(dim=1).tolist()
 
         last_offset = start_offset - 1
         with self.autocast:
@@ -396,10 +477,8 @@ class LMModel(nn.Module):
 
                 if beam_size == 1:
                     # ── Standard greedy / sampling path ──────────────────
-                    if early_stop_on_token is not None:
-                        done = (gen_sequence == early_stop_on_token).any(dim=1).all()
-                        if done:
-                            break
+                    if ended is not None and all(ended):
+                        break
 
                     next_token = self._sample_next_token(
                         input_,
@@ -412,6 +491,7 @@ class LMModel(nn.Module):
                         top_p=top_p,
                         cfg_coef=cfg_coef,
                         forbidden_tokens=forbidden_tokens,
+                        decoder=decoder,
                     )  # [B]
 
                     input_T = input_.shape[-1]
@@ -426,6 +506,10 @@ class LMModel(nn.Module):
                         this_gen_step == ungenerated, next_token, this_gen_step
                     )
                     gen_sequence[:, offset + 1] = next_token
+                    if ended is not None:
+                        for i, tok in enumerate(next_token.tolist()):
+                            if tok == early_stop_on_token:
+                                ended[i] = True
 
                     yield gen_sequence[:, offset + 1]  # [num_samples]
 

@@ -1,6 +1,7 @@
 """Beat-grid detection, for writing real tempo and time signatures into MIDI."""
 
 import dataclasses
+import functools
 import logging
 import math
 from collections.abc import Sequence
@@ -344,6 +345,18 @@ def infer_beats_per_bar(
     return int(values[best])
 
 
+@functools.lru_cache(maxsize=2)
+def _beat_tracker(checkpoint: str, device: str):
+    """The beat_this model, loaded once per (checkpoint, device) and reused:
+    loading it again for every song (the server's every request) costs more
+    than running it on a GPU."""
+    # Imported here, not at module scope: beat_this pulls in torchaudio and soxr,
+    # which would slow every CLI invocation that never transcribes anything.
+    from beat_this.inference import Audio2Beats
+
+    return Audio2Beats(checkpoint_path=checkpoint, device=device, dbn=False)
+
+
 def detect_grid(
     wav: torch.Tensor, sr: int, checkpoint: str = "final0", device: str = "cpu"
 ) -> BeatGrid:
@@ -362,10 +375,6 @@ def detect_grid(
     back with beats_per_bar=None or steady=False, since the beats alone are
     worth writing.
     """
-    # Imported here, not at module scope: beat_this pulls in torchaudio and soxr,
-    # which would slow every CLI invocation that never transcribes anything.
-    from beat_this.inference import Audio2Beats
-
     # This triggers an error in beat_this so report as BeatDetectionError directly
     min_duration_s = 1.0
     if wav.shape[-1] < min_duration_s * sr:
@@ -376,9 +385,7 @@ def detect_grid(
     signal = wav.mean(dim=0).detach().cpu().numpy()  # beat_this wants mono, 1-D
     # Returns (beats, downbeats) despite beat_this's own File2File unpacking
     # them the other way round.
-    beats, downbeats = Audio2Beats(
-        checkpoint_path=checkpoint, device=device, dbn=False
-    )(signal, sr)
+    beats, downbeats = _beat_tracker(checkpoint, device)(signal, sr)
 
     beats = regularized_beats(np.asarray(beats, dtype=float))
     downbeats = np.asarray(downbeats, dtype=float)

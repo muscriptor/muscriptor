@@ -151,7 +151,7 @@ def transcribe(
             "--dtype",
             help=(
                 "Transformer dtype: 'float32', 'float16' or 'bfloat16'. "
-                "Default: float16 on MPS, float32 elsewhere."
+                "Default: float16 on CUDA and MPS, float32 on CPU."
             ),
         ),
     ] = None,
@@ -560,7 +560,7 @@ def serve(
             "--dtype",
             help=(
                 "Transformer dtype: 'float32', 'float16' or 'bfloat16'. "
-                "Default: float16 on MPS, float32 elsewhere."
+                "Default: float16 on CUDA and MPS, float32 on CPU."
             ),
         ),
     ] = None,

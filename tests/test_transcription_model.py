@@ -179,6 +179,7 @@ def test_missing_eos_warns_and_still_emits_when_allowed():
 class _FakeAudio:
     """Just enough of a model for detect_beat_grid_for's mode dispatch."""
 
+    _device = torch.device("cpu")
     _load_wav = staticmethod(lambda tensor, sr: tensor)
     detect_beat_grid_for = TranscriptionModel.detect_beat_grid_for
 

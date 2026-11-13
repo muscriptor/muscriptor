@@ -4,6 +4,7 @@ import contextlib
 import io
 import json
 import math
+import os
 import re
 import sys
 import time
@@ -276,6 +277,7 @@ class TranscriptionModel:
         weights_path: str | Path | None = None,
         device: str | torch.device | None = None,
         dtype: str | torch.dtype | None = None,
+        cuda_graphs: bool | None = None,
     ) -> "TranscriptionModel":
         """Load model weights and return a ready-to-use TranscriptionModel.
 
@@ -289,11 +291,16 @@ class TranscriptionModel:
                 (CUDA, MPS, ...) if one is available, else CPU.
             dtype: Transformer weight/compute dtype: ``"float32"``,
                 ``"float16"``, ``"bfloat16"`` (or the torch dtypes). ``None``
-                picks per device: float16 on MPS (halves memory traffic —
-                decode is bandwidth-bound), float32 elsewhere (CUDA gets fp16
-                compute via autocast instead). The conditioning pipeline
-                (mel-spectrogram/class embeddings) always stays in fp32; its
-                outputs are cast at the transformer boundary.
+                picks per device: float16 on CUDA and MPS (halves memory
+                traffic — decode is bandwidth-bound — and saves autocast
+                re-casting every weight on every step), float32 on CPU.
+                ``float32`` on CUDA computes in fp16 via autocast. The
+                conditioning pipeline (mel-spectrogram/class embeddings)
+                always stays in fp32; its outputs are cast at the transformer
+                boundary.
+            cuda_graphs: Replay the decode steps as CUDA graphs (CUDA only).
+                ``None`` turns it on for CUDA unless the environment variable
+                ``MUSCRIPTOR_CUDA_GRAPHS=0`` is set.
         """
         if device is None:
             device = (
@@ -305,7 +312,7 @@ class TranscriptionModel:
             device = torch.device(device)
 
         if dtype is None:
-            dtype = torch.float16 if device.type == "mps" else torch.float32
+            dtype = torch.float16 if device.type in ("cuda", "mps") else torch.float32
         elif isinstance(dtype, str):
             dtype = getattr(torch, dtype)
 
@@ -323,6 +330,13 @@ class TranscriptionModel:
             # Conditioners keep fp32 numerics (log-mel of quiet passages
             # underflows in fp16); LMModel.forward casts their outputs.
             model.condition_provider.float()
+            # Weights already are in half precision: autocast would only add
+            # a dispatch per op (and recast bfloat16 to float16).
+            model.autocast = TorchAutocast(enabled=False)
+
+        if cuda_graphs is None:
+            cuda_graphs = os.environ.get("MUSCRIPTOR_CUDA_GRAPHS", "1") != "0"
+        model.cuda_graphs = bool(cuda_graphs) and device.type == "cuda"
 
         tokenizer = MT3Tokenizer(
             instrument_vocabulary="MT3_FULL_PLUS",
@@ -691,7 +705,11 @@ class TranscriptionModel:
             return None
         tensor, sample_rate = audio if isinstance(audio, tuple) else (audio, None)
         try:
-            return detect_grid(self._load_wav(tensor, sample_rate), _SAMPLE_RATE)
+            return detect_grid(
+                self._load_wav(tensor, sample_rate),
+                _SAMPLE_RATE,
+                device=str(self._device) if self._device.type == "cuda" else "cpu",
+            )
         except BeatDetectionError as e:
             if mode is True:
                 raise
