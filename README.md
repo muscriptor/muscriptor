@@ -133,6 +133,23 @@ It works best if there is a clear beat, because that allows us to quantize the n
 them to a grid) for a cleaner transcription. Without a steady tempo the score follows the
 performance's tempo changes; rubato recordings will still work noticeably worse.
 
+### Many files at once
+
+Pass several files to transcribe them together, which is much faster on a GPU: each forward
+pass generates chunks of up to `--batch-size` different files. A file still contributes one
+chunk at a time, so prelude forcing stays on. In full fp32 the transcriptions are identical to
+those of one file at a time; with the default fp16 autocast on CUDA, batching changes the rounding
+and a fraction of a percent of the notes can differ.
+
+```bash
+muscriptor transcribe songs/*.mp3 --batch-size 32 --output-dir midi/
+```
+
+From Python, `TranscriptionModel.transcribe_batch(audios, batch_size=32)` takes a list (or a
+generator) of paths or `(tensor, sample_rate)` tuples and yields `(index, events)` for each
+input as soon as it is done; `model.postprocess(audio, events)` turns them into the same MIDI
+file as `transcribe_and_postprocess`.
+
 ## Using from Python
 
 MuScriptor is also on PyPI, so you can install it with with uv (recommended) or with pip:

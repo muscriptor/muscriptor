@@ -165,6 +165,7 @@ def _forbidden_tokens_used_by_transcribe(instruments, tokenizer):
         _tokenizer = tokenizer
         _instrument_for_program = staticmethod(lambda program: "x")
         _resolve_batch_size = TranscriptionModel._resolve_batch_size
+        _instrument_constraints = TranscriptionModel._instrument_constraints
 
         def _load_wav(self, audio, sample_rate):
             return torch.zeros(1, 16000)
