@@ -59,15 +59,17 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-install-project
 
 # Pre-fetch the soundfonts (253 MB: .sf2 for /auralize, .sf3 for the web UI)
-# into the HF hub cache so a fresh container doesn't download them on first
-# use. Runs off just the two files it needs, before the full source COPY,
-# so day-to-day code changes don't re-trigger the download.
-COPY muscriptor/soundfonts.py muscriptor/utils/download.py /tmp/prewarm/
+# and the beat_this checkpoint (77 MB, tempo detection) into the HF hub cache
+# so a fresh container doesn't download them on first use. Runs off just the
+# files it needs, before the full source COPY, so day-to-day code changes
+# don't re-trigger the download.
+COPY muscriptor/soundfonts.py muscriptor/utils/download.py muscriptor/utils/beats.py /tmp/prewarm/
 RUN /app/.venv/bin/python -c "\
 import sys; sys.path.insert(0, '/tmp/prewarm'); \
-import soundfonts, download; \
+import soundfonts, download, beats; \
 download.download_if_necessary(soundfonts.SF2_URL); \
-download.download_if_necessary(soundfonts.SF3_URL)" \
+download.download_if_necessary(soundfonts.SF3_URL); \
+download.download_if_necessary(beats.BEAT_CHECKPOINT_URL)" \
     && rm -rf /tmp/prewarm
 
 COPY pyproject.toml uv.lock README.md ./

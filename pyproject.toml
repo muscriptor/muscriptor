@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "muscriptor"
-version = "0.3.0"
+version = "0.4.0"
 description = "Music transcription to MIDI and sheet music using a transformer language model"
 readme = "README.md"
 requires-python = ">=3.10"
