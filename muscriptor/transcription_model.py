@@ -7,7 +7,6 @@ import math
 import re
 import sys
 import time
-import traceback
 import warnings
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
@@ -698,18 +697,6 @@ class TranscriptionModel:
                 raise
             print(
                 f"Warning: {e}; falling back to the placeholder tempo",
-                file=sys.stderr,
-            )
-            return None
-        except Exception:
-            # Anything else (the beat model failing to load, say) is a bug or an
-            # outage, not a property of the audio. Best-effort still must not
-            # throw away a transcription that took minutes over it.
-            if mode is True:
-                raise
-            traceback.print_exc()
-            print(
-                "Warning: tempo detection failed; falling back to the placeholder tempo",
                 file=sys.stderr,
             )
             return None
