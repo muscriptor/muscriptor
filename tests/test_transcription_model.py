@@ -196,4 +196,3 @@ def test_detect_tempo_modes(monkeypatch):
     # true: the caller wanted to know.
     with pytest.raises(BeatDetectionError):
         model.detect_beat_grid_for((None, None), True)
-
