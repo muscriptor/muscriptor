@@ -196,3 +196,16 @@ def test_detect_tempo_modes(monkeypatch):
     # true: the caller wanted to know.
     with pytest.raises(BeatDetectionError):
         model.detect_beat_grid_for((None, None), True)
+
+
+def test_best_effort_survives_unexpected_detector_errors(monkeypatch):
+    """A beat model that can't even load must not cost the transcription."""
+
+    def boom(*args, **kwargs):
+        raise ValueError("Could not load the checkpoint given the provided name")
+
+    monkeypatch.setattr("muscriptor.transcription_model.detect_grid", boom)
+    model = _FakeAudio()
+    assert model.detect_beat_grid_for((None, None), "best-effort") is None
+    with pytest.raises(ValueError):
+        model.detect_beat_grid_for((None, None), True)

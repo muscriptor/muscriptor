@@ -22,6 +22,14 @@ MIN_METER_AGREEMENT = 0.9
 
 MIN_BEATS = 8
 
+# beat_this's "final0" checkpoint (MIT, JKU Linz), re-hosted next to the
+# soundfonts. beat_this would otherwise download it on first use from JKU's
+# cloud, which made every transcription fail while that host was down.
+# "final0" over "small0": the small model emits spurious beats before the first
+# downbeat, which shifts the bar offset by a beat or two.
+# SHA-256 starts with 8c328b45f59d8dd3.
+BEAT_CHECKPOINT_URL = "hf://MuScriptor/assets/beat_this-final0.ckpt"
+
 # A tracked beat closer than this many median beat spacings to the previous one
 # is an extra beat; see regularized_beats().
 EXTRA_BEAT_SPACING = 0.7
@@ -345,16 +353,18 @@ def infer_beats_per_bar(
 
 
 def detect_grid(
-    wav: torch.Tensor, sr: int, checkpoint: str = "final0", device: str = "cpu"
+    wav: torch.Tensor,
+    sr: int,
+    checkpoint: str = BEAT_CHECKPOINT_URL,
+    device: str = "cpu",
 ) -> BeatGrid:
     """Detect a constant-tempo beat grid.
 
     Args:
         wav: Audio as [C, T] (this repo's convention), float32.
         sr: Sample rate of `wav`; beat_this resamples internally.
-        checkpoint: beat_this checkpoint name. "final0" over "small0": the small
-            model emits spurious beats before the first downbeat, which shifts
-            the bar offset by a beat or two.
+        checkpoint: beat_this checkpoint, in any form download_if_necessary
+            accepts (hf:// or http(s):// URL, or a local path).
         device: Torch device for the beat model.
 
     Raises BeatDetectionError when the audio is too short or has too few beats.
@@ -365,6 +375,8 @@ def detect_grid(
     # Imported here, not at module scope: beat_this pulls in torchaudio and soxr,
     # which would slow every CLI invocation that never transcribes anything.
     from beat_this.inference import Audio2Beats
+
+    from muscriptor.utils.download import download_if_necessary
 
     # This triggers an error in beat_this so report as BeatDetectionError directly
     min_duration_s = 1.0
@@ -377,7 +389,9 @@ def detect_grid(
     # Returns (beats, downbeats) despite beat_this's own File2File unpacking
     # them the other way round.
     beats, downbeats = Audio2Beats(
-        checkpoint_path=checkpoint, device=device, dbn=False
+        checkpoint_path=str(download_if_necessary(checkpoint)),
+        device=device,
+        dbn=False,
     )(signal, sr)
 
     beats = regularized_beats(np.asarray(beats, dtype=float))
