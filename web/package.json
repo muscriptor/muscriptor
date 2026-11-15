@@ -26,6 +26,7 @@
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "spessasynth_lib": "^4.3.8",
-    "tone": "^15.1.22"
+    "tone": "^15.1.22",
+    "wavesurfer.js": "^7.12.11"
   }
 }
