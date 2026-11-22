@@ -151,7 +151,7 @@ def scaled_meter(beats_per_bar: int | None, scale: float) -> int | None:
     """
     if beats_per_bar is None:
         return None
-    scaled = beats_per_bar * scale
+    scaled = float(beats_per_bar * scale)
     return int(scaled) if scaled >= 1 and scaled.is_integer() else beats_per_bar
 
 
