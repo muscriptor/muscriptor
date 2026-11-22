@@ -3,9 +3,9 @@
 import dataclasses
 import math
 
+import mido
 import numpy as np
 import pytest
-import mido
 from mido import MidiFile
 
 from muscriptor.tokenizer.notes import Note
@@ -15,6 +15,7 @@ from muscriptor.utils.midi import (
     TICKS_PER_BEAT,
     ExportOptions,
     notes_to_midi,
+    scaled_meter,
 )
 
 
@@ -597,3 +598,18 @@ def test_smoothing_takes_the_trackers_frame_jitter_out_of_the_tempo():
 def test_beat_scale_must_be_a_power_of_two():
     with pytest.raises(ValueError):
         ExportOptions(beat_scale=3)
+
+
+@pytest.mark.parametrize(
+    ("beats_per_bar", "scale", "expected"),
+    [
+        (4, 2, 8),
+        (4, 1, 4),
+        (3, 2, 6),
+        (4, 0.5, 2),
+        (4, 1.5, 6),
+        (None, 2, None),
+    ],
+)
+def test_scaled_meter_accepts_integer_scales(beats_per_bar, scale, expected):
+    assert scaled_meter(beats_per_bar, scale) == expected
