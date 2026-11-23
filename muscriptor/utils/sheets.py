@@ -40,6 +40,25 @@ _APP_LOCATIONS = (
     "~/MuseScore.AppImage",
     "~/Applications/MuseScore.AppImage",
 )
+# The Windows installers' default locations (MuseScore Studio 4.x), under
+# %ProgramFiles% / %ProgramFiles(x86)% / %LOCALAPPDATA%, which are not on PATH.
+_WINDOWS_RELATIVE = (
+    "MuseScore 4/bin/MuseScore4.exe",
+    "MuseScore Studio 4/bin/MuseScore4.exe",
+    "MuseScore 3/bin/MuseScore3.exe",
+)
+
+
+def _windows_locations() -> list[str]:
+    if platform.system() != "Windows":
+        return []
+    roots = [
+        os.environ.get(var)
+        for var in ("ProgramFiles", "ProgramW6432", "ProgramFiles(x86)", "LOCALAPPDATA")
+    ]
+    return [str(Path(r) / rel) for r in roots if r for rel in _WINDOWS_RELATIVE]
+
+
 # Checked before anything else, for a MuseScore that isn't on PATH.
 MUSESCORE_ENV_VAR = "MUSCRIPTOR_MUSESCORE"
 
@@ -122,9 +141,9 @@ def _candidates() -> list[str]:
         path = shutil.which(name)
         if path:
             found.append(path)
-    for location in _APP_LOCATIONS:
+    for location in (*_APP_LOCATIONS, *_windows_locations()):
         path = Path(location).expanduser()
-        if path.is_file():
+        if path.is_file() and str(path) not in found:
             found.append(str(path))
     return found
 

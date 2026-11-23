@@ -57,6 +57,15 @@ dependencies = [
     "beat-this>=1.1",  # Tempo and downbeat tracking
 ]
 
+[project.optional-dependencies]
+# `muscriptor audio-to-sheet`: source separation and audio chord recognition.
+# Without them the pipeline still runs (no stems, chords from the notes alone).
+sheet = [
+    "demucs>=4.0",  # htdemucs_6s stems (MIT code and weights)
+    "lv-chordia>=1.1",  # large-vocabulary chord recognition (MIT, weights bundled)
+    "audioop-lts>=0.2 ; python_version >= '3.13'",  # pydub (via lv-chordia) on 3.13+
+]
+
 [project.urls]
 Homepage = "https://github.com/muscriptor/muscriptor"
 Repository = "https://github.com/muscriptor/muscriptor"
