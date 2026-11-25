@@ -1,0 +1,54 @@
+# Example configuration for `muscriptor audio-to-sheet --config sheet.example.toml`.
+# Every key is optional; see muscriptor/sheet/config.py for all of them.
+# Precedence: defaults < quality preset < this file < environment < CLI flags.
+
+quality = "standard"        # draft | standard | high
+device = "auto"             # auto | cpu | cuda | cuda:1 | mps
+# output_dir = "output"     # parent directory; the audio name is appended
+resume = true               # reuse stems / transcriptions already in the output dir
+
+[separation]
+method = "auto"             # auto (roformer if its environment is set, else demucs) | roformer | demucs | none
+# python = "C:/Workloads/MusicProgrammings/sep-env/Scripts/python.exe"  # audio-separator env (or $MUSCRIPTOR_SEPARATOR_PYTHON)
+# model_dir = "C:/Workloads/MusicProgrammings/sep-models"               # (or $MUSCRIPTOR_SEPARATOR_MODELS)
+roformer_model = "BS-Roformer-SW.ckpt"  # vocals, drums, bass, guitar, piano, other
+# refine_model = "17_HP-Wind_Inst-UVR.pth"  # optional 2nd pass on refine_inputs
+# refine_inputs = ["other"]
+model = "htdemucs_6s"       # the demucs model
+shifts = 0                  # demucs: >0 is slower, slightly cleaner stems
+silence_db = -32.0          # stems quieter than this (vs. the mix) count as absent
+gate_db = -30.0             # stem notes where the stem is this far below the mix are bleed
+
+[transcription]
+model = "medium"            # small | medium | large | local .safetensors | hf:// URL
+stems = ["auto", "-drums"] # stems re-transcribed with an instrument constraint ("auto" = all, "-x" excludes)
+min_stem_notes = 30
+
+[rhythm]
+# beats_per_bar = 4         # override the detected/inferred meter
+# first_downbeat = 1.88     # seconds: a bar line in the recording
+beat_scale = 1.0            # 2 if the tempo came out half, 0.5 if double
+swing = "auto"              # auto | on | off
+allow_triplets = true
+finest = 4                  # 4 = sixteenths, 2 = eighths
+fill_gaps_beats = 0.5       # hold melodic notes over rests up to this long
+fill_gaps_beats_keyboard = 1.0
+
+[cleanup]
+min_part_notes = 40         # thinner instruments are merged into a same-role part or dropped
+min_duration = 0.045
+min_duration_sustained = 0.07
+split_strings = true        # write a "Strings" section as separate parts
+string_parts = 3            # 3 = violin, viola, cello; 2 = violin, cello
+strings_articulation = "audio"  # audio (merge split notes, keep real re-bowing) | legato (merge all) | off
+
+[harmony]
+audio_chords = true         # lv-chordia on the mix (needs the 'sheet' extra)
+min_chord_beats = 2
+local_keys = true           # write key changes
+sections = true             # rehearsal marks + double bar lines
+
+[render]
+# musescore = "C:/Program Files/MuseScore 4/bin/MuseScore4.exe"
+pdf = true
+part_pdfs = true

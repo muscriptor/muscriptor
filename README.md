@@ -133,6 +133,25 @@ It works best if there is a clear beat, because that allows us to quantize the n
 them to a grid) for a cleaner transcription. Without a steady tempo the score follows the
 performance's tempo changes; rubato recordings will still work noticeably worse.
 
+### Audio to readable sheet music (full pipeline)
+
+`muscriptor audio-to-sheet` goes further than `--format sheets`: it separates
+the stems, cleans the transcription up musically, finds the meter, quantizes
+with a per-beat adaptive grid, separates voices and staves per instrument,
+recognizes chord symbols (with inversions/slash chords) and the key, marks the
+sections, and writes its own MusicXML before MuseScore renders the PDF.
+
+```bash
+uv pip install -e ".[sheet]"    # Demucs + lv-chordia
+muscriptor audio-to-sheet "song.mp3"           # → output/song/score.musicxml, score.pdf, parts/, chords.json, …
+muscriptor audio-to-sheet "song.mp3" --quality high --device cuda
+```
+
+Every stage leaves an artifact (stems, raw/cleaned notes, raw and reconstructed
+MIDI, chords, Notation IR, readability report), and re-runs reuse the
+expensive ones. See [docs/audio-to-sheet.md](docs/audio-to-sheet.md) for the
+architecture, configuration, outputs and limitations.
+
 ## Using from Python
 
 MuScriptor is also on PyPI, so you can install it with with uv (recommended) or with pip:

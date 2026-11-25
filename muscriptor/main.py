@@ -584,6 +584,259 @@ def serve(
     uvicorn.run(fastapi_app, host=host, port=port)
 
 
+@app.command("audio-to-sheet")
+def audio_to_sheet(
+    audio_file: Annotated[
+        Path, typer.Argument(help="Input audio file (wav, mp3, flac, …)")
+    ],
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Output directory. Default: output/<audio name> (or $MUSCRIPTOR_OUTPUT_DIR/<audio name>).",
+        ),
+    ] = None,
+    config: Annotated[
+        Path | None,
+        typer.Option(
+            "--config", "-c", help="TOML config file (see muscriptor/sheet/config.py)."
+        ),
+    ] = None,
+    quality: Annotated[
+        str | None,
+        typer.Option(
+            "--quality",
+            "-q",
+            help="draft (small model, no separation), standard (medium + every stem but drums), high (large + all stems).",
+        ),
+    ] = None,
+    device: Annotated[
+        str | None,
+        typer.Option("--device", "-d", help="auto, cpu, cuda, cuda:0, mps …"),
+    ] = None,
+    model_path: Annotated[
+        str | None,
+        typer.Option(
+            "--model",
+            "-m",
+            help="Transcription model: small | medium | large | path | URL.",
+        ),
+    ] = None,
+    separation: Annotated[
+        str | None,
+        typer.Option(
+            "--separation",
+            help="Source separation: auto (roformer if $MUSCRIPTOR_SEPARATOR_PYTHON is set, else demucs) | roformer | demucs | none.",
+        ),
+    ] = None,
+    stems: Annotated[
+        str | None,
+        typer.Option(
+            "--stems",
+            help="Comma-separated stems to re-transcribe (vocals,bass,drums,piano,guitar,other,…; auto = all, -name to exclude); '' for none.",
+        ),
+    ] = None,
+    audio_chords: Annotated[
+        bool | None,
+        typer.Option(
+            "--audio-chords/--no-audio-chords",
+            help="Use lv-chordia on the audio for chord recognition.",
+        ),
+    ] = None,
+    musescore: Annotated[
+        str | None, typer.Option("--musescore", help="MuseScore 4 executable.")
+    ] = None,
+    pdf: Annotated[
+        bool | None, typer.Option("--pdf/--no-pdf", help="Render PDFs with MuseScore.")
+    ] = None,
+    beats_per_bar: Annotated[
+        int | None,
+        typer.Option(
+            "--beats-per-bar", min=1, max=12, help="Override the detected meter (n/4)."
+        ),
+    ] = None,
+    beat_scale: Annotated[
+        float | None,
+        typer.Option(
+            "--beat-scale",
+            help="2 if the detected tempo is half what it should be, 0.5 if double.",
+        ),
+    ] = None,
+    bpm: Annotated[
+        float | None,
+        typer.Option("--bpm", min=20, max=400, help="Force a constant tempo."),
+    ] = None,
+    swing: Annotated[
+        str | None, typer.Option("--swing", help="auto | on | off.")
+    ] = None,
+    title: Annotated[
+        str | None, typer.Option("--title", help="Score title (default: file name).")
+    ] = None,
+    resume: Annotated[
+        bool | None,
+        typer.Option(
+            "--resume/--no-resume",
+            help="Reuse stems/transcriptions already in the output directory.",
+        ),
+    ] = None,
+    strings_articulation: Annotated[
+        str | None,
+        typer.Option(
+            "--strings-articulation",
+            help="Repeated string notes: audio (default: merge where the stem has no new bow stroke) | legato (merge all — best for ballads) | off.",
+        ),
+    ] = None,
+    string_parts: Annotated[
+        int | None,
+        typer.Option(
+            "--string-parts",
+            help="Write a string section as 3 parts (violin, viola, cello; default) or 2 (violin, cello); 0 keeps one Strings part.",
+        ),
+    ] = None,
+) -> None:
+    """Audio → separated parts → MusicXML + PDF sheet music with chord symbols."""
+    import logging
+
+    from muscriptor.sheet.config import load_config
+    from muscriptor.sheet.pipeline import PipelineError, run_pipeline
+    from muscriptor.sheet.render import MuseScoreError
+
+    logging.basicConfig(
+        level=logging.INFO, format="%(levelname)s %(name)s: %(message)s"
+    )
+    if not audio_file.is_file():
+        typer.echo(f"Error: file not found: {audio_file}", err=True)
+        raise typer.Exit(1)
+    try:
+        cfg = load_config(config, quality)  # type: ignore[arg-type]
+    except (ValueError, RuntimeError, OSError) as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    if device is not None:
+        cfg.device = device
+    if model_path is not None:
+        cfg.transcription.model = model_path
+    if separation is not None:
+        cfg.separation.method = separation  # type: ignore[assignment]
+    if stems is not None:
+        cfg.transcription.stems = [s.strip() for s in stems.split(",") if s.strip()]
+    if audio_chords is not None:
+        cfg.harmony.audio_chords = audio_chords
+    if musescore is not None:
+        cfg.render.musescore = musescore
+    if pdf is not None:
+        cfg.render.pdf = pdf
+    if beats_per_bar is not None:
+        cfg.rhythm.beats_per_bar = beats_per_bar
+    if beat_scale is not None:
+        cfg.rhythm.beat_scale = beat_scale
+    if bpm is not None:
+        cfg.rhythm.bpm = bpm
+    if swing is not None:
+        cfg.rhythm.swing = swing  # type: ignore[assignment]
+    if title is not None:
+        cfg.title = title
+    if resume is not None:
+        cfg.resume = resume
+    if strings_articulation is not None:
+        cfg.cleanup.strings_articulation = strings_articulation  # type: ignore[assignment]
+    if string_parts is not None:
+        cfg.cleanup.split_strings = string_parts > 0
+        if string_parts > 0:
+            cfg.cleanup.string_parts = string_parts
+    if cfg.separation.method == "none":
+        cfg.transcription.stems = []
+    from muscriptor.sheet.config import validate_config
+
+    try:
+        validate_config(cfg)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+
+    if output is None:
+        base = Path(cfg.output_dir) if cfg.output_dir else Path("output")
+        output = base / audio_file.stem
+
+    try:
+        result = run_pipeline(audio_file, cfg, output)
+    except (PipelineError, MuseScoreError, ModelDownloadError) as e:
+        typer.echo(f"Error: {e}", err=True)
+        typer.echo(
+            f"See {output / 'pipeline.log'} and {output / 'report.json'}.", err=True
+        )
+        raise typer.Exit(1)
+
+    typer.echo("", err=True)
+    for rec in result.report["stages"]:
+        extra = rec.get("error", "")
+        typer.echo(
+            f"  {rec['stage']:<14} {rec['status']:<11} {rec['seconds']:>7.1f}s {extra}",
+            err=True,
+        )
+    typer.echo(f"\nOutput: {output.resolve()}", err=True)
+    for name in ("musicxml", "pdf", "chords", "notation", "reconstructed_midi"):
+        if name in result.artifacts:
+            typer.echo(f"  {name:<20} {result.artifacts[name]}", err=True)
+
+
+@app.command("download-models")
+def download_models(
+    model_path: Annotated[
+        str,
+        typer.Option(
+            "--model",
+            "-m",
+            help="Transcription model size to fetch: small | medium | large.",
+        ),
+    ] = "medium",
+    separation_model: Annotated[
+        str,
+        typer.Option("--separation-model", help="Demucs model to fetch ('' to skip)."),
+    ] = "htdemucs_6s",
+) -> None:
+    """Fetch every model the audio-to-sheet pipeline uses, once, ahead of time.
+
+    MuScriptor weights and the beat tracker go to the HuggingFace cache
+    ($HF_HOME); Demucs weights to the torch.hub cache ($TORCH_HOME).
+    lv-chordia ships its weights inside its package.
+    """
+    from muscriptor.transcription_model import _resolve_source
+    from muscriptor.utils.beats import BEAT_CHECKPOINT_URL
+    from muscriptor.utils.download import download_if_necessary
+
+    try:
+        typer.echo(
+            f"MuScriptor {model_path}: {download_if_necessary(_resolve_source(model_path))}"
+        )
+        typer.echo(f"beat_this: {download_if_necessary(BEAT_CHECKPOINT_URL)}")
+    except ModelDownloadError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+    if separation_model:
+        try:
+            from demucs.pretrained import get_model
+        except ImportError:
+            typer.echo(
+                "Demucs is not installed (install the 'sheet' extra); skipped.",
+                err=True,
+            )
+        else:
+            get_model(separation_model)
+            typer.echo(f"Demucs {separation_model}: cached")
+    try:
+        import lv_chordia  # noqa: F401
+
+        typer.echo("lv-chordia: installed (weights bundled)")
+    except ImportError:
+        typer.echo(
+            "lv-chordia is not installed (install the 'sheet' extra): chords will come from the notes alone.",
+            err=True,
+        )
+
+
 @app.command()
 def list_instruments():
     """List the instrument group names accepted by --instruments."""
