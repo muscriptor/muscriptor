@@ -16,16 +16,34 @@ Transcription (what sounded) and notation (how to write it) are separate
 layers, joined by an intermediate representation (the Notation IR):
 
 ```
-audio ─┬─ separation      Demucs htdemucs_6s → drums, bass, vocals, guitar, piano, other
+audio ─┬─ ingest          decoded once → input.wav (44.1 kHz stereo)
+       ├─ separation      BS-Roformer-SW (roformer) or Demucs htdemucs_6s →
+       │                  drums, bass, vocals, guitar, piano, other
+       │                  [+ optional 2nd pass on piano+other, e.g. a winds model]
+       │                  + per-stem activity curve (level vs. the mix, every 0.5 s)
        ├─ transcription   MuScriptor on the mix (all instruments, instrument labels)
-       │                  + MuScriptor on the vocals/bass stems, instrument-constrained;
-       │                    stem notes replace that family's notes from the mix
+       │                  + MuScriptor on every stem, instrument-constrained
+       │                    ("other" may only be strings/winds/brass/synth — never
+       │                    piano/guitar); notes where the stem is inactive are
+       │                    gated as bleed; stem notes replace that family's notes
        ├─ beats           beat_this on the mix (tempo map follows the performance)
        └─ audio chords    lv-chordia on the mix (large vocabulary, root/quality/bass)
 raw performance notes ── raw.mid
   → cleanup        duplicates, split fragments, ghost/harmonic notes, octave errors,
                    range, monophony (bass/voice/horns), polyphony limits,
                    label noise (one bass part, one voice), sparse parts merged/dropped
+  → strings        re-articulation: same-pitch notes the model split are glued
+                   back where the stem shows no new bow stroke at that pitch
+                   (constant-Q rise; articulation.py, cleanup.strings_articulation =
+                   audio | legato | off);
+                   section split: Violin / Viola / Violoncello (or Violin +
+                   Violoncello, cleanup.string_parts = 2), per chord a
+                   cost-based cut (range, continuity, held notes, divisi);
+                   tidy per part: ≤ 2 notes per chord (outer kept), chord notes
+                   end together, short gaps closed, small overhangs cut, held
+                   notes cut where a new chord leaves no free desk, no
+                   same-pitch overlap, cello notes under C2 folded up
+                   (sections.py)
   → meter          detected meter, or inferred from chord changes / bass / kick
                    when the tracker's downbeats disagree; leading empty bars trimmed
   → quantization   per-beat grid (1, 2, 4 | 3, 6) chosen by Viterbi: timing error
@@ -57,7 +75,7 @@ Code: `muscriptor/sheet/` — one module per stage (`separation`, `transcription
 | Stage | Choice | Why |
 |---|---|---|
 | Transcription | MuScriptor (existing) | Strongest open multi-instrument model; its instrument labels are the instrument detection. |
-| Separation | Demucs `htdemucs_6s` | MIT code + weights, 6 stems incl. guitar/piano, installs alongside this project. BS-RoFormer via `audio-separator` (the research's first pick) pins an older `rotary-embedding-torch` than `beat_this` needs. |
+| Separation | BS-Roformer-SW via `python-audio-separator` (`roformer`), else Demucs `htdemucs_6s` | Instrument identity must be settled at the audio level: on the full mix, sustained strings under a piano are labelled piano and no cleanup rule can undo that. BS-Roformer-SW has a much better piano and "other" stem than htdemucs_6s. audio-separator pins an older `rotary-embedding-torch` than `beat_this` needs, so it runs as a subprocess in its own environment (see below). Demucs stays the in-process fallback. |
 | Beats | beat_this (existing) | No DBN, follows tempo changes. |
 | Audio chords | lv-chordia (ISMIR 2019) | MIT, weights bundled, CPU-fast, outputs root/quality/bass (slash chords). ChordFormer/BTC need separate weight hosting. |
 | Chord fusion, key, quantization, voices, structure | Own algorithms | No packaged open tool does these for band scores (research: "build ourselves"). |
@@ -99,11 +117,51 @@ environment variables, then CLI flags.
 
 | CLI | Config | Env | |
 |---|---|---|---|
-| `--quality` | `quality` | | `draft` (small model, no separation), `standard`, `high` (large model, all stems) |
+| `--quality` | `quality` | | `draft` (small model, no separation), `standard` (every stem but drums), `high` (large model, all stems) |
 | `--device` | `device` | `MUSCRIPTOR_DEVICE` | `auto`, `cpu`, `cuda`, `mps` |
 | `--model` | `transcription.model` | `MUSCRIPTOR_MODEL` | `small`/`medium`/`large`/path/URL |
-| `--separation` | `separation.method` | `MUSCRIPTOR_SEPARATION` | `demucs`/`none` |
-| `--stems` | `transcription.stems` | | e.g. `vocals,bass,guitar` |
+| `--separation` | `separation.method` | `MUSCRIPTOR_SEPARATION` | `auto` (roformer if its env is configured, else demucs) / `roformer` / `demucs` / `none` |
+| | `separation.python` | `MUSCRIPTOR_SEPARATOR_PYTHON` | interpreter of the audio-separator environment |
+| | `separation.model_dir` | `MUSCRIPTOR_SEPARATOR_MODELS` | audio-separator model cache (default `~/.cache/muscriptor/separator-models`) |
+| | `separation.roformer_model`, `refine_model`, `refine_inputs` | | pass-A model (default `BS-Roformer-SW.ckpt`); optional pass B on the sum of `refine_inputs` |
+| | `separation.gate_db` | | stem notes where the stem is this far below the mix are bleed (default −30) |
+| | `cleanup.split_strings`, `string_parts` | | split "Strings" into 3 (violin/viola/cello) or 2 parts; `false` keeps one grand-staff part |
+| | `cleanup.strings_articulation` | | `audio` (default: glue split notes, keep real re-bowing), `legato` (every repeat merged — reads best for ballads), `off` |
+| `--stems` | `transcription.stems` | | `auto` = every stem, `-drums` excludes; or e.g. `vocals,bass,other` |
+
+### The `roformer` separator environment
+
+```powershell
+uv venv C:\sep-env --python 3.12
+uv pip install --python C:\sep-env\Scripts\python.exe "audio-separator[gpu]" audioread
+# CUDA torch last, from the PyTorch index only (Blackwell / RTX 50xx needs cu128+):
+uv pip install --python C:\sep-env\Scripts\python.exe --reinstall torch torchaudio --index-url https://download.pytorch.org/whl/cu130
+$env:MUSCRIPTOR_SEPARATOR_PYTHON = "C:\sep-env\Scripts\python.exe"
+muscriptor audio-to-sheet song.mp3            # auto → roformer
+```
+
+Each stem is transcribed in two passes (`transcription.transcribe_stem`):
+first with only the hard instrument mask and no conditioning, to *recognise*
+which allowed groups play; then constrained to and conditioned on those
+groups. MuScriptor was trained with the conditioning naming the instruments
+actually present, so conditioning on a whole family is out of distribution
+(on a strings stem it produced no notes at all; on a piano stem it split
+one piano into acoustic + electric halves). A stem the separator found
+silent removes that family from the mix transcription: on a piano + strings
+ballad the mix model labelled 1526 notes "guitar" although BS-Roformer-SW's
+guitar stem was at −38 dB.
+
+Measured on "piano + strings + vocals" pop ballad (3:33, RTX 5060 Ti):
+BS-Roformer-SW ≈ 100 s (fp32, batch 1, ~4 GB VRAM), stem transcription
+≈ 110 s for 4 stems × 2 passes (medium). Strings went from 272 notes
+(htdemucs_6s, single pass) to 2833, piano from 1395 (largely strings) to
+953, and the 1446 phantom guitar notes are gone.
+
+MuScriptor sends a JSON request to `muscriptor/sheet/_separator_driver.py`
+in that interpreter and reads back the stem paths, so nothing from that
+environment is imported into MuScriptor's. The stems directory records which
+separator made it (`stems/manifest.json`); changing the separator recomputes
+the stems instead of reusing stale ones.
 | `--musescore` | `render.musescore` | `MUSCRIPTOR_MUSESCORE` | MuseScore 4 executable |
 | `-o` | `output_dir` | `MUSCRIPTOR_OUTPUT_DIR` | |
 | `--beats-per-bar`, `--beat-scale`, `--bpm`, `--swing` | `rhythm.*` | | fix meter/tempo detection |

@@ -608,7 +608,7 @@ def audio_to_sheet(
         typer.Option(
             "--quality",
             "-q",
-            help="draft (small model, no separation), standard (medium + vocals/bass stems), high (large + all stems).",
+            help="draft (small model, no separation), standard (medium + every stem but drums), high (large + all stems).",
         ),
     ] = None,
     device: Annotated[
@@ -625,13 +625,16 @@ def audio_to_sheet(
     ] = None,
     separation: Annotated[
         str | None,
-        typer.Option("--separation", help="Source separation: demucs | none."),
+        typer.Option(
+            "--separation",
+            help="Source separation: auto (roformer if $MUSCRIPTOR_SEPARATOR_PYTHON is set, else demucs) | roformer | demucs | none.",
+        ),
     ] = None,
     stems: Annotated[
         str | None,
         typer.Option(
             "--stems",
-            help="Comma-separated stems to re-transcribe (vocals,bass,drums,piano,guitar); '' for none.",
+            help="Comma-separated stems to re-transcribe (vocals,bass,drums,piano,guitar,other,…; auto = all, -name to exclude); '' for none.",
         ),
     ] = None,
     audio_chords: Annotated[
@@ -675,6 +678,20 @@ def audio_to_sheet(
         typer.Option(
             "--resume/--no-resume",
             help="Reuse stems/transcriptions already in the output directory.",
+        ),
+    ] = None,
+    strings_articulation: Annotated[
+        str | None,
+        typer.Option(
+            "--strings-articulation",
+            help="Repeated string notes: audio (default: merge where the stem has no new bow stroke) | legato (merge all — best for ballads) | off.",
+        ),
+    ] = None,
+    string_parts: Annotated[
+        int | None,
+        typer.Option(
+            "--string-parts",
+            help="Write a string section as 3 parts (violin, viola, cello; default) or 2 (violin, cello); 0 keeps one Strings part.",
         ),
     ] = None,
 ) -> None:
@@ -723,8 +740,21 @@ def audio_to_sheet(
         cfg.title = title
     if resume is not None:
         cfg.resume = resume
+    if strings_articulation is not None:
+        cfg.cleanup.strings_articulation = strings_articulation  # type: ignore[assignment]
+    if string_parts is not None:
+        cfg.cleanup.split_strings = string_parts > 0
+        if string_parts > 0:
+            cfg.cleanup.string_parts = string_parts
     if cfg.separation.method == "none":
         cfg.transcription.stems = []
+    from muscriptor.sheet.config import validate_config
+
+    try:
+        validate_config(cfg)
+    except ValueError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
 
     if output is None:
         base = Path(cfg.output_dir) if cfg.output_dir else Path("output")

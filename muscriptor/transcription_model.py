@@ -343,6 +343,7 @@ class TranscriptionModel:
         no_eos_is_ok: bool = True,
         beam_size: int = 1,
         prelude_forcing: bool = True,
+        condition_on_instruments: bool = True,
     ) -> Iterator[NoteStartEvent | NoteEndEvent | ProgressEvent]:
         """Transcribe audio into a stream of note events.
 
@@ -355,6 +356,13 @@ class TranscriptionModel:
         token outside the listed groups is masked out during generation, so
         no other instrument can appear in the output. Leave it unset to let
         the model decode whatever instruments it detects.
+
+        The model was trained with the instrument conditioning naming the
+        instruments actually playing, so a long list (a whole family, "maybe
+        any of these") is out of distribution and can make it emit nothing.
+        ``condition_on_instruments=False`` keeps the hard constraint but
+        leaves the conditioning empty: the model picks among the allowed
+        instruments itself.
 
         ``prelude_forcing`` (default True) teacher-forces each chunk's tie
         prologue — the tokens declaring which notes are sustained from the
@@ -383,6 +391,8 @@ class TranscriptionModel:
         instrument_group = (
             instrument_group_from_names(instruments) if instruments else None
         )
+        if not condition_on_instruments:
+            instrument_group = None
         forbidden_tokens = None
         if instruments:
             forbidden_tokens = torch.tensor(

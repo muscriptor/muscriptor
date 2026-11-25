@@ -43,7 +43,15 @@ from pathlib import Path
 
 import numpy as np
 
-from muscriptor.sheet import cleanup, harmony, notation, rhythm, structure, voices
+from muscriptor.sheet import (
+    cleanup,
+    harmony,
+    notation,
+    rhythm,
+    sections,
+    structure,
+    voices,
+)
 from muscriptor.sheet.config import PipelineConfig, config_to_dict
 from muscriptor.sheet.instruments import STEM_GROUPS, spec_for
 from muscriptor.sheet.ir import (
@@ -62,6 +70,11 @@ logger = logging.getLogger("muscriptor.sheet")
 
 class PipelineError(RuntimeError):
     pass
+
+
+# Bump when stem transcription changes in a way that makes cached stem
+# transcriptions stale (transcription.transcribe_stem).
+STEM_TRANSCRIPTION = "detect+condition/1"
 
 
 @dataclass
@@ -268,6 +281,12 @@ def run_pipeline(
     audio = Path(audio)
     if not audio.is_file():
         raise PipelineError(f"audio file not found: {audio}")
+    from muscriptor.sheet.config import validate_config
+
+    try:
+        validate_config(cfg)
+    except ValueError as e:
+        raise PipelineError(str(e)) from e
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "transcription").mkdir(exist_ok=True)
     handler = _setup_logging(out_dir)
@@ -318,40 +337,91 @@ def run_pipeline(
             report["duration"] = info.duration
 
         # 2. Separation -----------------------------------------------------
-        from muscriptor.sheet.separation import make_separator, stems_from_dir
+        from muscriptor.sheet.config import resolve_separation_method, resolve_stems
+        from muscriptor.sheet.separation import (
+            cached_stems,
+            ingest_audio,
+            make_separator,
+            separator_signature,
+            write_manifest,
+        )
 
         stems_dir = out_dir / "stems"
         stems = []
+        sig: dict | None = None
         with stages.stage("separation") as rec:
-            sep = make_separator(
-                cfg.separation.method,
-                cfg.separation.model,
-                cfg.torch_device,
-                cfg.separation.shifts,
-                cfg.separation.overlap,
+            sep_cfg = dataclasses.replace(
+                cfg.separation, method=resolve_separation_method(cfg)
             )
-            if sep is None:
+            rec["method"] = sep_cfg.method
+            if sep_cfg.method == "none":
                 rec["status"] = "skipped"
-            elif (
-                cfg.resume
-                and stems_dir.is_dir()
-                and len(list(stems_dir.glob("*.wav"))) >= 4
-            ):
-                stems = stems_from_dir(stems_dir, audio)
-                rec["status"] = "cached"
             else:
-                stems = sep.separate(audio, stems_dir)
+                # Decode once: separators and stem levels all read this file.
+                mix_wav = ingest_audio(audio, out_dir / "input.wav")
+                sig = separator_signature(sep_cfg)
+                rec["separator"] = sig
+                cached = cached_stems(stems_dir, mix_wav, sig) if cfg.resume else None
+                if cached:
+                    stems = cached
+                    rec["status"] = "cached"
+                else:
+                    sep = make_separator(sep_cfg, cfg.torch_device)
+                    if stems_dir.is_dir():
+                        for old in stems_dir.glob("*.wav"):
+                            old.unlink()
+                    stems = sep.separate(mix_wav, stems_dir)
+                    write_manifest(stems_dir, sig)
             rec["stems"] = {s.name: round(s.level_db, 1) for s in stems}
+            rec["active"] = {
+                s.name: round(s.activity.active_ratio(sep_cfg.gate_db), 2)
+                for s in stems
+                if s.activity is not None
+            }
             if stems:
                 art["stems"] = str(stems_dir)
 
         # 3. Transcription --------------------------------------------------
-        from muscriptor.sheet.transcription import merge_stem_notes, transcribe_audio
+        from muscriptor.sheet.transcription import (
+            gate_notes,
+            merge_stem_notes,
+            transcribe_audio,
+            transcribe_stem,
+        )
 
         tdir = out_dir / "transcription"
         with stages.stage("transcription") as rec:
+            # What produced the cached transcriptions: a stem transcription is
+            # only reused if it came from these very stems, this model and
+            # this stem-transcription method (older runs have no key).
+            key_path = tdir / "cache.json"
+            key = {
+                "model": cfg.transcription.model or "medium",
+                "beam_size": cfg.transcription.beam_size,
+                "separator": sig,
+                "stem_mode": STEM_TRANSCRIPTION,
+            }
+            old_key = (
+                json.loads(key_path.read_text(encoding="utf-8"))
+                if key_path.is_file()
+                else {}
+            )
+            mix_ok = (
+                old_key.get("model", key["model"]) == key["model"]
+                and old_key.get("beam_size", key["beam_size"]) == key["beam_size"]
+            )
+            stems_ok = old_key == key
+            if (
+                cfg.resume
+                and not stems_ok
+                and any((tdir / f"{n}.json").is_file() for n in STEM_GROUPS)
+            ):
+                logger.info(
+                    "transcription: cached stem transcriptions are from another "
+                    "separator/model/method, re-transcribing the stems"
+                )
             mix_path = tdir / "mix.json"
-            if cfg.resume and mix_path.is_file():
+            if cfg.resume and mix_ok and mix_path.is_file():
                 mix_notes = load_performance(mix_path)
                 rec["status"] = "cached"
             else:
@@ -362,33 +432,52 @@ def run_pipeline(
             art["transcription_mix"] = str(mix_path)
             stem_notes: dict[str, list[PerformanceNote]] = {}
             by_name = {s.name: s for s in stems}
-            for name in cfg.transcription.stems:
+            wanted = resolve_stems(cfg.transcription.stems, list(by_name))
+            rec["stems"] = wanted
+            detected: dict[str, list[str]] = {}
+            absent: set[str] = set()
+            for name in wanted:
                 stem = by_name.get(name)
-                if stem is None:
+                if stem is None or name not in STEM_GROUPS:
                     continue
                 if stem.level_db < cfg.separation.silence_db:
+                    # The separator has a stem for this family and found it
+                    # silent: whatever the mix transcription labelled so is
+                    # another instrument (e.g. strings read as guitar).
+                    absent.add(name)
                     logger.info(
-                        "transcription: %s stem is silent (%.1f dB), skipped",
+                        "transcription: %s stem is silent (%.1f dB): dropping "
+                        "that family from the mix transcription",
                         name,
                         stem.level_db,
                     )
                     continue
                 path = tdir / f"{name}.json"
-                if cfg.resume and path.is_file():
+                if cfg.resume and stems_ok and path.is_file():
                     stem_notes[name] = load_performance(path)
                 else:
-                    stem_notes[name] = transcribe_audio(
+                    rec["status"] = "running"  # not all of it came from the cache
+                    stem_notes[name], detected[name] = transcribe_stem(
                         get_model(),
                         stem.path,
                         name,
-                        instruments=list(STEM_GROUPS[name]),
+                        list(STEM_GROUPS[name]),
                         beam_size=cfg.transcription.beam_size,
                     )
                     save_performance(stem_notes[name], path)
                 art[f"transcription_{name}"] = str(path)
+                if name in detected:
+                    rec.setdefault("detected", {})[name] = detected[name]
+                # Gate after caching, so the threshold can be tuned on resume.
+                stem_notes[name] = gate_notes(
+                    stem_notes[name], stem.activity, cfg.separation.gate_db, name
+                )
+            key_path.write_text(json.dumps(key, indent=1), encoding="utf-8")
             raw_notes = merge_stem_notes(
-                mix_notes, stem_notes, cfg.transcription.min_stem_notes
+                mix_notes, stem_notes, cfg.transcription.min_stem_notes, absent
             )
+            if absent:
+                rec["absent"] = sorted(absent)
             rec["notes"] = len(raw_notes)
             rec["by_instrument"] = _count(raw_notes)
             if not raw_notes:
@@ -451,6 +540,18 @@ def run_pipeline(
                 min_duration_sustained=cfg.cleanup.min_duration_sustained,
             )
             clean = cleanup.clean_notes(raw_notes, opts)
+            if cfg.cleanup.split_strings:
+                secs = (
+                    (sections.CELLO, sections.VIOLA, sections.VIOLIN)
+                    if cfg.cleanup.string_parts >= 3
+                    else (sections.CELLO, sections.VIOLIN)
+                )
+                sopts = sections.SectionSplitOptions(
+                    sections=secs, articulation=cfg.cleanup.strings_articulation
+                )
+                sources = {s.name: s.path for s in stems}
+                sources["mix"] = audio
+                clean = sections.split_string_sections(clean, sopts, sources)
             save_performance(clean, tdir / "cleaned.json")
             art["cleaned"] = str(tdir / "cleaned.json")
             rec["notes"] = len(clean)
@@ -728,6 +829,11 @@ def run_pipeline(
             art["musicxml"] = str(xml_path)
             parts_dir = out_dir / "parts"
             parts_dir.mkdir(exist_ok=True)
+            # Parts of a previous run (other instruments, other numbering)
+            # would otherwise sit next to this run's.
+            for old in parts_dir.glob("[0-9][0-9]_*"):
+                if old.suffix in (".musicxml", ".pdf", ".mscz"):
+                    old.unlink()
             part_files = []
             for i, p in enumerate(score.parts, start=1):
                 slug = "".join(

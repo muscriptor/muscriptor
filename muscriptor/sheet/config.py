@@ -8,7 +8,9 @@ Environment variables:
     MUSCRIPTOR_MODEL          transcription model: small | medium | large | path | URL
     MUSCRIPTOR_MUSESCORE      MuseScore 4 executable (also used by `--format sheets`)
     MUSCRIPTOR_OUTPUT_DIR     default parent directory for outputs
-    MUSCRIPTOR_SEPARATION     "demucs" | "none"
+    MUSCRIPTOR_SEPARATION     "auto" | "demucs" | "roformer" | "none"
+    MUSCRIPTOR_SEPARATOR_PYTHON  python of the audio-separator environment (roformer)
+    MUSCRIPTOR_SEPARATOR_MODELS  where audio-separator models are cached
     TORCH_HOME                where Demucs caches its weights (torch.hub)
     HF_HOME / HF_HUB_OFFLINE  HuggingFace cache / offline mode for MuScriptor weights
 
@@ -18,12 +20,13 @@ Example `sheet.toml`:
     device = "cuda"
 
     [separation]
-    method = "demucs"
-    model = "htdemucs_6s"
+    method = "roformer"            # or "demucs"
+    python = "C:/sep-env/Scripts/python.exe"
+    roformer_model = "BS-Roformer-SW.ckpt"
 
     [transcription]
     model = "medium"
-    stems = ["vocals", "bass"]
+    stems = ["auto", "-drums"]
 
     [harmony]
     audio_chords = true
@@ -46,14 +49,30 @@ Quality = Literal["draft", "standard", "high"]
 
 @dataclass
 class SeparationConfig:
-    method: Literal["demucs", "none"] = "demucs"
-    # htdemucs_6s: drums, bass, other, vocals, guitar, piano (MIT weights).
+    # auto = roformer when a separator environment is configured
+    # (python / $MUSCRIPTOR_SEPARATOR_PYTHON), demucs otherwise.
+    method: Literal["auto", "demucs", "roformer", "none"] = "auto"
+    # Demucs model. htdemucs_6s: drums, bass, other, vocals, guitar, piano.
     model: str = "htdemucs_6s"
     # Random-shift test-time augmentation; >0 is slower but cleaner.
     shifts: int = 0
     overlap: float = 0.25
+    # --- roformer (python-audio-separator, own environment) ---
+    python: str | None = None  # that environment's interpreter
+    model_dir: str | None = None  # model cache ($MUSCRIPTOR_SEPARATOR_MODELS)
+    roformer_model: str = "BS-Roformer-SW.ckpt"
+    # Optional second pass on the sum of `refine_inputs` (e.g. a strings or
+    # woodwinds model); its stems replace those inputs.
+    refine_model: str | None = None
+    refine_inputs: list[str] = field(default_factory=lambda: ["piano", "other"])
+    batch_size: int = 1
+    roformer_overlap: int = 8
+    autocast: bool = False
     # A stem quieter than this (dB relative to the mix) is treated as absent.
     silence_db: float = -32.0
+    # Stem-transcription notes where the stem is this far below the mix
+    # (per half second) are bleed from another instrument and are dropped.
+    gate_db: float = -30.0
 
 
 @dataclass
@@ -63,7 +82,9 @@ class TranscriptionConfig:
     beam_size: int = 1
     # Stems re-transcribed with MuScriptor (instrument-constrained); their
     # notes replace that instrument family's notes from the full mix.
-    stems: list[str] = field(default_factory=lambda: ["vocals", "bass"])
+    # "auto" = every separated stem with a known instrument family;
+    # "-name" removes one ("auto", "-drums").
+    stems: list[str] = field(default_factory=lambda: ["auto", "-drums"])
     # A stem transcription with fewer notes is ignored (the mix's notes stay).
     min_stem_notes: int = 30
 
@@ -87,6 +108,13 @@ class CleanupConfig:
     min_part_notes: int = 40
     min_duration: float = 0.045
     min_duration_sustained: float = 0.07
+    # Write a "Strings" section as separate parts: 3 = violin, viola, cello;
+    # 2 = violin, cello (sections.py).
+    split_strings: bool = True
+    string_parts: int = 3
+    # Split sustained string notes glued back together: "audio" where the
+    # stem shows no new bow stroke, "legato" (every repeat), "off" (articulation.py).
+    strings_articulation: Literal["audio", "legato", "off"] = "audio"
 
 
 @dataclass
@@ -137,7 +165,7 @@ def apply_preset(cfg: PipelineConfig, quality: Quality) -> None:
     elif quality == "high":
         cfg.transcription.model = cfg.transcription.model or "large"
         cfg.separation.shifts = max(cfg.separation.shifts, 1)
-        cfg.transcription.stems = ["vocals", "bass", "drums", "piano", "guitar"]
+        cfg.transcription.stems = ["auto"]
 
 
 def _merge(obj: Any, data: dict[str, Any], where: str) -> None:
@@ -164,7 +192,8 @@ def load_config(
             import tomllib
         except ImportError as e:  # Python 3.10
             raise RuntimeError("TOML config files need Python 3.11+") from e
-        data = tomllib.loads(Path(path).read_text(encoding="utf-8"))
+        # utf-8-sig: Windows PowerShell 5.1 writes UTF-8 files with a BOM.
+        data = tomllib.loads(Path(path).read_text(encoding="utf-8-sig"))
     preset = quality or data.get("quality") or "standard"
     apply_preset(cfg, preset)
     _merge(cfg, {k: v for k, v in data.items() if k != "quality"}, "")
@@ -178,7 +207,57 @@ def load_config(
         cfg.output_dir = env["MUSCRIPTOR_OUTPUT_DIR"]
     if env.get("MUSCRIPTOR_SEPARATION"):
         cfg.separation.method = env["MUSCRIPTOR_SEPARATION"]  # type: ignore[assignment]
+    if env.get("MUSCRIPTOR_SEPARATOR_PYTHON") and not cfg.separation.python:
+        cfg.separation.python = env["MUSCRIPTOR_SEPARATOR_PYTHON"]
+    validate_config(cfg)
     return cfg
+
+
+_CHOICES: dict[str, tuple[object, ...]] = {
+    "quality": ("draft", "standard", "high"),
+    "separation.method": ("auto", "demucs", "roformer", "none"),
+    "cleanup.strings_articulation": ("audio", "legato", "off"),
+    "cleanup.string_parts": (2, 3),
+    "rhythm.swing": ("auto", "on", "off"),
+}
+
+
+def validate_config(cfg: PipelineConfig) -> None:
+    """Raise ValueError on a value no stage accepts (before anything runs)."""
+    for key, allowed in _CHOICES.items():
+        obj = cfg
+        *path, name = key.split(".")
+        for part in path:
+            obj = getattr(obj, part)
+        value = getattr(obj, name)
+        if value not in allowed:
+            raise ValueError(
+                f"{key} = {value!r} is not one of {', '.join(map(repr, allowed))}"
+            )
+
+
+def resolve_separation_method(cfg: PipelineConfig) -> str:
+    """'auto' → 'roformer' if its environment is configured, else 'demucs'."""
+    if cfg.separation.method != "auto":
+        return cfg.separation.method
+    from muscriptor.sheet.separation import separator_python_available
+
+    return "roformer" if separator_python_available(cfg.separation.python) else "demucs"
+
+
+def resolve_stems(requested: list[str], available: list[str]) -> list[str]:
+    """Expand "auto" / "-name" in `transcription.stems` against the separated stems."""
+    from muscriptor.sheet.instruments import STEM_GROUPS
+
+    out: list[str] = []
+    for item in requested:
+        if item == "auto":
+            out += [s for s in available if s in STEM_GROUPS and s not in out]
+        elif item.startswith("-"):
+            out = [s for s in out if s != item[1:]]
+        elif item not in out:
+            out.append(item)
+    return out
 
 
 def config_to_dict(cfg: PipelineConfig) -> dict[str, Any]:

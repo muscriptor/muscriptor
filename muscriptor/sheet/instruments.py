@@ -417,16 +417,64 @@ def spec_for(group: str) -> InstrumentSpec:
     )
 
 
-# Demucs htdemucs_6s stems → the MuScriptor groups that may be decoded from
-# them. Used to constrain transcription of a stem (so the bass stem can only
-# yield bass notes) and to decide which notes of the full-mix transcription a
-# stem transcription replaces.
+_HIGH_STRINGS = ("violin", "viola", "string_ensemble", "synth_strings")
+_LOW_STRINGS = ("cello", "contrabass")
+_STRINGS = ("violin", "viola", "cello", "string_ensemble", "synth_strings")
+_WOODWINDS = (
+    "flutes",
+    "oboe",
+    "english_horn",
+    "clarinet",
+    "bassoon",
+    "soprano_and_alto_sax",
+    "tenor_sax",
+    "baritone_sax",
+)
+_BRASS = ("trumpet", "french_horn", "trombone", "tuba", "brass_section")
+
+# Separated stems → the MuScriptor groups that may be decoded from them. Used
+# to constrain transcription of a stem (so the bass stem can only yield bass
+# notes) and to decide which notes of the full-mix transcription a stem
+# transcription replaces.
+#
+# The 6-stem separators (htdemucs_6s, BS-Roformer-SW) leave strings, winds,
+# brass and synths in "other". Constraining it to exactly those families is
+# what keeps sustained strings from being labelled piano: with piano and
+# guitar forbidden, the model must name the bowed line for what it is.
+# Organ is left out on purpose: allowed, it is what the model reaches for
+# next on a sustained string pad (on a piano + strings ballad it took 92% of
+# the "other" stem), and the separators put keyboards in the piano stem.
+# Orchestra hit is left out because conditioning on it derails decoding.
+# The remaining names are stems a second-pass (refine) model may produce.
 STEM_GROUPS: dict[str, tuple[str, ...]] = {
     "vocals": ("voice",),
     "bass": ("electric_bass", "acoustic_bass", "contrabass"),
     "drums": ("drums",),
     "piano": ("acoustic_piano", "electric_piano", "organ"),
     "guitar": ("acoustic_guitar", "clean_electric_guitar", "distorted_electric_guitar"),
+    "other": _STRINGS
+    + _WOODWINDS
+    + _BRASS
+    + (
+        "orchestral_harp",
+        "chromatic_percussion",
+        "synth_lead",
+        "synth_pad",
+    ),
+    "harmonic_other": _STRINGS
+    + _WOODWINDS
+    + _BRASS
+    + ("orchestral_harp", "synth_lead", "synth_pad"),
+    "strings": _STRINGS + ("contrabass",),
+    "high_strings": _HIGH_STRINGS,
+    "violin": ("violin", "viola", "string_ensemble"),
+    "low_strings": _LOW_STRINGS,
+    "cello": _LOW_STRINGS,
+    "winds": _WOODWINDS,
+    "flute": ("flutes",),
+    "brass": _BRASS,
+    "organ": ("organ",),
+    "synth": ("synth_lead", "synth_pad", "synth_strings"),
 }
 
 
